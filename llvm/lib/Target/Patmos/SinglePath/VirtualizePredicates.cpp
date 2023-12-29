@@ -88,109 +88,142 @@ void VirtualizePredicates::unpredicateCounterSpillReload(MachineFunction &MF) {
 	// registers used for loop counter management and their loop
 	std::set<std::pair<Register, MachineLoop*>> counter_mgmt_regs;
 
-	for(auto &header_mbb: MF){
-		auto header = &header_mbb;
-		auto loop = LI.getLoopFor(header);
+	for(auto &HeaderMbb: MF){
+		auto *header = &HeaderMbb;
+		auto *loop = LI.getLoopFor(header);
 		if(!LI.isLoopHeader(header) || !PatmosSinglePathInfo::needsCounter(loop)) continue;
 
-		assert(getLoopBounds(header));
-		auto loop_bound = getLoopBounds(header)->second;
-		MachineBasicBlock *preheader, *unilatch;
-		std::tie(preheader, unilatch) = PatmosSinglePathInfo::getPreHeaderUnilatch(loop);
+		assert(getLoopBounds(header) or getVLoopBounds(header));
+		
+		// TODO: better than copy/pasting, this is terrible
+		if (getLoopBounds(header)) {
+			auto LoopBound = getLoopBounds(header)->second;
+			MachineBasicBlock *Preheader, *Unilatch;
+			std::tie(Preheader, Unilatch) = PatmosSinglePathInfo::getPreHeaderUnilatch(loop);
 
-		auto is_counter_init = [&](MachineInstr &instr){
-			return
-				(instr.getOpcode() == Patmos::LIi || instr.getOpcode() == Patmos::LIl) &&
-				(instr.getOperand(1).isReg() && instr.getOperand(1).getReg()== Patmos::P0) &&
-				(instr.getOperand(2).isImm() && instr.getOperand(2).getImm()== 0) &&
-				(instr.getOperand(3).isImm() && instr.getOperand(3).getImm()== loop_bound);
-		};
-		assert(std::count_if(preheader->begin(), preheader->end(), is_counter_init) == 1
-				&& "Ambiguous counter initializer");
-		// Find loop counter initializer in preheader
-		auto found_counter_init = std::find_if(preheader->begin(), preheader->end(), is_counter_init);
-		assert(found_counter_init != preheader->end());
-		auto counter_reg = found_counter_init->getOperand(0).getReg();
+			auto IsCounterInit = [LoopBound](MachineInstr &Instr){
+				return
+					(Instr.getOpcode() == Patmos::LIi || Instr.getOpcode() == Patmos::LIl) &&
+					(Instr.getOperand(1).isReg() && Instr.getOperand(1).getReg()== Patmos::P0) &&
+					(Instr.getOperand(2).isImm() && Instr.getOperand(2).getImm()== 0) &&
+					(Instr.getOperand(3).isImm() && Instr.getOperand(3).getImm()== LoopBound);
+			};
+			assert(std::count_if(Preheader->begin(), Preheader->end(), IsCounterInit) == 1
+					&& "Ambiguous counter initializer");
+			// Find loop counter initializer in preheader
+			auto FoundCounterInit = std::find_if(Preheader->begin(), Preheader->end(), IsCounterInit);
+			assert(FoundCounterInit != Preheader->end());
+			auto CounterReg = FoundCounterInit->getOperand(0).getReg();
 
-		// Check if it is spilled
-		auto maybe_spill = std::next(found_counter_init);
-		int frame_index;
-		unsigned reg = TII->isStoreToStackSlot(*maybe_spill, frame_index);
+			// Check if it is spilled
+			auto MaybeSpill = std::next(FoundCounterInit);
+			int FrameIndex;
+			unsigned reg = TII->isStoreToStackSlot(*MaybeSpill, FrameIndex);
 
-		if(reg != 0 && counter_reg == reg) {
-			// Since the counter is spilled immediately, there is no point in using a general-purpose
-			// register, that might need to first be spilled so it doesn't overwrite a different paths use of the same register.
-			// (it might also overrite a caller's user of the register when the function is called disabled).
-			// Therefore, just use R26, since it is reserved
-			found_counter_init->getOperand(0).setReg(Patmos::R26);
-			LLVM_DEBUG(
-				dbgs() << "Loop counter initializer switched to use R26 in 'bb."
-				<< preheader->getNumber() << "." << preheader->getName() << "':";
-				found_counter_init->dump();
-			);
+			if(reg != 0 && CounterReg == reg) {
+				// Since the counter is spilled immediately, there is no point in using a general-purpose
+				// register, that might need to first be spilled so it doesn't overwrite a different paths use of the same register.
+				// (it might also overrite a caller's user of the register when the function is called disabled).
+				// Therefore, just use R26, since it is reserved
+				FoundCounterInit->getOperand(0).setReg(Patmos::R26);
+				LLVM_DEBUG(
+					dbgs() << "Loop counter initializer switched to use R26 in 'bb."
+					<< Preheader->getNumber() << "." << Preheader->getName() << "':";
+					FoundCounterInit->dump();
+				);
 
-			assert(maybe_spill->getOperand(0).isReg() && maybe_spill->getOperand(0).getReg() == Patmos::NoRegister);
-			assert(maybe_spill->getOperand(1).isImm() && maybe_spill->getOperand(1).getImm() == 0);
-			maybe_spill->getOperand(0).setReg(Patmos::P0);
-			maybe_spill->getOperand(4).setReg(Patmos::R26);
-			LLVM_DEBUG(
-				dbgs() << "Loop counter for loop header 'bb." << header->getNumber() << "." << header->getName()
-				<< "' is spilled. Unpredicating spills/reloads:\n"
-				<< "in 'bb." << preheader->getNumber() << "." << preheader->getName()
-				<< "':"; maybe_spill->dump();
-			);
+				assert(MaybeSpill->getOperand(0).isReg() && MaybeSpill->getOperand(0).getReg() == Patmos::NoRegister);
+				assert(MaybeSpill->getOperand(1).isImm() && MaybeSpill->getOperand(1).getImm() == 0);
+				MaybeSpill->getOperand(0).setReg(Patmos::P0);
+				MaybeSpill->getOperand(4).setReg(Patmos::R26);
+				LLVM_DEBUG(
+					dbgs() << "Loop counter for loop header 'bb." << header->getNumber() << "." << header->getName()
+					<< "' is spilled. Unpredicating spills/reloads:\n"
+					<< "in 'bb." << Preheader->getNumber() << "." << Preheader->getName()
+					<< "':"; MaybeSpill->dump();
+				);
 
-			// Find spill/reload in unilatch and update
-			auto unilatch_dec = PatmosSinglePathInfo::getUnilatchCounterDecrementer(unilatch);
-			auto unilatch_dec_def = unilatch_dec->getOperand(0).getReg(); // register after decrement
-			auto unilatch_dec_use = unilatch_dec->getOperand(3).getReg(); // register before decrement
-			assert(unilatch_dec_def == unilatch_dec_use && "Decrement changing registers (unexpected)");
+				// Find spill/reload in unilatch and update
+				auto UnilatchDec = PatmosSinglePathInfo::getUnilatchCounterDecrementer(Unilatch);
+				auto UnilatchDecDef = UnilatchDec->getOperand(0).getReg(); // register after decrement
+				auto UnilatchDecUse = UnilatchDec->getOperand(3).getReg(); // register before decrement
+				assert(UnilatchDecDef == UnilatchDecUse && "Decrement changing registers (unexpected)");
 
-			// Update reload
-			auto reload = std::prev(unilatch_dec);
-			int reload_fi;
-			unsigned reload_reg = TII->isLoadFromStackSlot(*reload, reload_fi);
-			assert(reload_fi == frame_index && "Loop counter stack slot mismatch");
-			assert(unilatch_dec_use == reload_reg && "Reload not using correct register" );
-			assert(reload->getOperand(1).isReg() && reload->getOperand(1).getReg() == Patmos::NoRegister);
-			assert(reload->getOperand(2).isImm() && reload->getOperand(2).getImm() == 0);
-			reload->getOperand(1).setReg(Patmos::P0);
-			reload->getOperand(0).setReg(Patmos::R26);
-			LLVM_DEBUG(
-				dbgs() << "in unilatch 'bb." << unilatch->getNumber() << "." << unilatch->getName()
-				<< "':"; reload->dump();
-			);
+				// Update reload
+				auto Reload = std::prev(UnilatchDec);
+				int ReloadFi;
+				unsigned ReloadReg = TII->isLoadFromStackSlot(*Reload, ReloadFi);
+				assert(ReloadFi == FrameIndex && "Loop counter stack slot mismatch");
+				assert(UnilatchDecUse == ReloadReg && "Reload not using correct register" );
+				assert(Reload->getOperand(1).isReg() && Reload->getOperand(1).getReg() == Patmos::NoRegister);
+				assert(Reload->getOperand(2).isImm() && Reload->getOperand(2).getImm() == 0);
+				Reload->getOperand(1).setReg(Patmos::P0);
+				Reload->getOperand(0).setReg(Patmos::R26);
+				LLVM_DEBUG(
+					dbgs() << "in unilatch 'bb." << Unilatch->getNumber() << "." << Unilatch->getName()
+					<< "':"; Reload->dump();
+				);
 
-			// Update spill
-			auto spill = std::next(unilatch_dec);
-			int spill_fi;
-			unsigned spill_reg = TII->isStoreToStackSlot(*spill, spill_fi);
-			assert(spill_fi == frame_index && "Loop counter stack slot mismatch");
-			assert(unilatch_dec_def == spill_reg && "Spill not using correct register" );
-			assert(spill->getOperand(0).isReg() && spill->getOperand(0).getReg() == Patmos::NoRegister);
-			assert(spill->getOperand(1).isImm() && spill->getOperand(1).getImm() == 0);
-			spill->getOperand(0).setReg(Patmos::P0);
-			spill->getOperand(4).setReg(Patmos::R26);
-			LLVM_DEBUG(
-				dbgs() << "in unilatch 'bb." << unilatch->getNumber() << "." << unilatch->getName()
-				<< "':"; spill->dump();
-			);
+				// Update spill
+				auto Spill = std::next(UnilatchDec);
+				int SpillFi;
+				unsigned SpillReg = TII->isStoreToStackSlot(*Spill, SpillFi);
+				assert(SpillFi == FrameIndex && "Loop counter stack slot mismatch");
+				assert(UnilatchDecDef == SpillReg && "Spill not using correct register" );
+				assert(Spill->getOperand(0).isReg() && Spill->getOperand(0).getReg() == Patmos::NoRegister);
+				assert(Spill->getOperand(1).isImm() && Spill->getOperand(1).getImm() == 0);
+				Spill->getOperand(0).setReg(Patmos::P0);
+				Spill->getOperand(4).setReg(Patmos::R26);
+				LLVM_DEBUG(
+					dbgs() << "in unilatch 'bb." << Unilatch->getNumber() << "." << Unilatch->getName()
+					<< "':"; Spill->dump();
+				);
 
-			unilatch_dec->getOperand(0).setReg(Patmos::R26);
-			unilatch_dec->getOperand(3).setReg(Patmos::R26);
-			LLVM_DEBUG(
-				dbgs() << "Loop counter decrementer switched to use R26 in 'bb."
-				<< unilatch->getNumber() << "." << unilatch->getName() << "':";
-				unilatch_dec->dump();
-			);
-		} else {
-			// This register will be initialized and decremented unpredicated.
-			// Even if the loop is not taken. This means it might interfere with a different path's
-			// use of the same register. The register might also be used by a caller, with the current
-			// function being called disabled. In such a case, the caller didn't save his registers before
-			// the call (since the path is disabled), which means we must spill/reload this register
-			// in the prologue/epilogue.
-			counter_mgmt_regs.insert(std::make_pair(counter_reg, loop));
+				UnilatchDec->getOperand(0).setReg(Patmos::R26);
+				UnilatchDec->getOperand(3).setReg(Patmos::R26);
+				LLVM_DEBUG(
+					dbgs() << "Loop counter decrementer switched to use R26 in 'bb."
+					<< Unilatch->getNumber() << "." << Unilatch->getName() << "':";
+					UnilatchDec->dump();
+				);
+			} else {
+				// This register will be initialized and decremented unpredicated.
+				// Even if the loop is not taken. This means it might interfere with a different path's
+				// use of the same register. The register might also be used by a caller, with the current
+				// function being called disabled. In such a case, the caller didn't save his registers before
+				// the call (since the path is disabled), which means we must spill/reload this register
+				// in the prologue/epilogue.
+				counter_mgmt_regs.insert(std::make_pair(CounterReg, loop));
+			}
+		} else if (getVLoopBounds(header)) {
+			auto LoopBoundRegister = getVLoopBounds(header);
+			MachineBasicBlock *Preheader, *Unilatch;
+			std::tie(Preheader, Unilatch) = PatmosSinglePathInfo::getPreHeaderUnilatch(loop);
+
+			auto IsCounterInit = [LoopBoundRegister](MachineInstr &Instr){
+				return
+					(Instr.getOpcode() == Patmos::COPY) &&
+					(Instr.getOperand(1).isReg() && Instr.getOperand(1).getReg()== LoopBoundRegister);
+			};
+			assert(std::count_if(Preheader->begin(), Preheader->end(), IsCounterInit) == 1
+					&& "Ambiguous counter initializer");
+			// Find loop counter initializer in preheader
+			auto found_counter_init = std::find_if(Preheader->begin(), Preheader->end(), IsCounterInit);
+			assert(found_counter_init != Preheader->end());
+			auto counter_reg = found_counter_init->getOperand(0).getReg();
+
+			// Check if it is spilled
+			auto maybe_spill = std::next(found_counter_init);
+			int frame_index;
+			unsigned reg = TII->isStoreToStackSlot(*maybe_spill, frame_index);
+
+			if(reg != 0 && counter_reg == reg) {
+				report_fatal_error("Spilling of counter reg not handled yet");
+			} else {
+				counter_mgmt_regs.insert(std::make_pair(counter_reg, loop));
+				// TODO: Why does the reaching def analysis mess with the program execution ? 
+				return;
+			}
 		}
 	}
 

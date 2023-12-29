@@ -58,6 +58,23 @@ Optional<std::pair<uint64_t, uint64_t>> llvm::getLoopBounds(const MachineBasicBl
   return None;
 }
 
+Optional<Register> llvm::getVLoopBounds(const MachineBasicBlock * MBB) {
+  if(MBB && MBB->getBasicBlock()) {
+    auto LoopBoundInstruction = std::find_if(MBB->begin(), MBB->end(), [&](auto &Instr){
+      return Instr.getOpcode() == Patmos::V_PSEUDO_LOOPBOUND;
+    });
+    if(LoopBoundInstruction != MBB->end()) {
+      assert(LoopBoundInstruction->getOperand(0).isImm());
+      assert(LoopBoundInstruction->getOperand(1).isReg());
+
+      llvm::dbgs() << "Loopbound is register : " << LoopBoundInstruction->getOperand(1) << "\n";
+      auto Max = LoopBoundInstruction->getOperand(1).getReg();
+      return Max;
+    }  
+  }
+  return None;
+}
+
 Target &llvm::getThePatmosTarget() {
   static Target ThePatmosTarget;
   return ThePatmosTarget;

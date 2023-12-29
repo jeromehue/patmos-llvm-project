@@ -353,6 +353,68 @@ PatmosTargetLowering::LowerCall(CallLoweringInfo &CLI,
                         DAG.getTargetConstant(cast<ConstantSDNode>(OutVals[0].getNode())->getZExtValue(),dl, MVT::i32),
                         DAG.getTargetConstant(cast<ConstantSDNode>(OutVals[1].getNode())->getZExtValue(),dl, MVT::i32)};
       return DAG.getNode(PatmosISD::LOOP_BOUND, dl, VTs, Ops);
+    } if (G->getGlobal()->getName() == "llvm.loop.varbound") {
+      // Define everything
+      SelectionDAG &DAG = CLI.DAG;
+      SmallVector<SDValue, 32> &OutVals = CLI.OutVals;
+      SmallVector<std::pair<unsigned, SDValue>, 4> RegsToPass;
+      SmallVector<CCValAssign, 16> ArgLocs;
+      SDValue InFlag;
+      SDValue Chain = CLI.Chain;
+      SDValue nChain;
+      const SDLoc dl = CLI.DL;
+
+      // In case LLVM has optimized our second argument
+      if(dyn_cast<ConstantSDNode>(OutVals[1].getNode())){
+        if(dyn_cast<ConstantSDNode>(OutVals[0].getNode()))  {
+          // return asif we had a llvm.loop.bound call
+          SDVTList VTs = DAG.getVTList(MVT::Other, MVT::Glue);
+          SDValue Ops[] = { CLI.Chain,
+                        DAG.getTargetConstant(cast<ConstantSDNode>(OutVals[0].getNode())->getZExtValue(),dl, MVT::i32),
+                        DAG.getTargetConstant(cast<ConstantSDNode>(OutVals[1].getNode())->getZExtValue(),dl, MVT::i32)};
+          return DAG.getNode(PatmosISD::LOOP_BOUND, dl, VTs, Ops);
+        }
+        else {
+            report_fatal_error("Lower loop bound must not be constant");
+        }
+      }
+
+      // FIXME: DO the same thing as for the first case (llvm.loop.bound) and returns
+
+      // The trick is to act as if we were calling a function, 
+      // to get the register holding the loop bound.
+      // Then we can simply store this register withing V_PSEUDO_LOOPBOUND instr.
+      CCState CCInfo(CLI.CallConv, CLI.IsVarArg, CLI.DAG.getMachineFunction(),
+                     ArgLocs, *CLI.DAG.getContext());
+      CCInfo.AnalyzeCallOperands(CLI.Outs, CC_Patmos);
+      assert(ArgLocs.size() > 0);
+
+      // TODO: Do we even need this ?
+      for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
+        CCValAssign &VA = ArgLocs[i];
+        SDValue Arg = CLI.OutVals[i];
+        assert(VA.getLocInfo() == CCValAssign::Full && VA.isRegLoc());
+        RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
+      }
+
+      assert(RegsToPass.size() > 0);
+     
+      SDValue MaxLoopBoundRegister;
+      if (OutVals.size() == 2) {
+        MaxLoopBoundRegister = SDValue(OutVals[1].getOperand(1).getNode(), 0);
+        MaxLoopBoundRegister.dump();
+      }
+
+      SDVTList VTs = CLI.DAG.getVTList(MVT::Other, MVT::Glue);
+      SDValue Ops[] = {
+          CLI.Chain,
+          CLI.DAG.getTargetConstant(
+              cast<ConstantSDNode>(CLI.OutVals[0].getNode())->getZExtValue(),
+              CLI.DL, MVT::i32),
+          MaxLoopBoundRegister
+      };
+      
+      return CLI.DAG.getNode(PatmosISD::V_LOOP_BOUND, CLI.DL, VTs, Ops);
     }
   }
 

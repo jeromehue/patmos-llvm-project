@@ -774,10 +774,12 @@ SPScope::SPScope(SPScope *parent, MachineLoop &loop, MachineFunction &MF, Machin
   }
 
   if(!hasLoopBound()) {
-    report_fatal_error(
-              "Single-path code generation failed! "
-              "Loop has no bound. Loop bound expected in the following MBB but was not found: '" +
-              header->getName() + "'!");
+    Priv->LoopBound = -1;
+    // TODO: Fix this, maybe check for getVLoopBounds also here
+    // report_fatal_error(
+    //           "Single-path code generation failed! "
+    //           "Loop has no bound. Loop bound expected in the following MBB but was not found: '" +
+    //          header->getName() + "'!");
   }
 }
 

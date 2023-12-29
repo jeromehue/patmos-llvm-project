@@ -1,9 +1,5 @@
 //==-- PatmosSinglePathInfo.h - Analysis Pass for SP CodeGen -------------===//
-//
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// //                     The LLVM Compiler Infrastructure // // This file is distributed under the University of Illinois Open Source // License. See LICENSE.TXT for details.
 //
 //===---------------------------------------------------------------------===//
 //
@@ -116,6 +112,10 @@ namespace llvm {
       /// Whether new single-path transformation may avoid using counters
       /// to ensure loops iterate a fixed number of times where possible.
       static bool useCountlessLoops();
+
+      /// Whether new single-path transformation should use the varloopbound
+      /// pragma, allowing to specify variables as loop bounds.
+      static bool useVariableLoopbounds();
 
       /// Returns the preheader and unilatch of the loop inserted by LoopCountInsert.
       ///

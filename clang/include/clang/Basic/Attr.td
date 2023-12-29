@@ -1508,6 +1508,20 @@ def LoopBound: Attr {
   }];
 }
 
+
+def VarLoopBound : Attr {
+  let Spellings = [Pragma<"", "varloopbound">];
+  let Args = [DefaultIntArgument<"Min", -1>,
+              ExprArgument<"Max">];
+  let AdditionalMembers = [{
+    void printPrettyPragma(raw_ostream &OS, const PrintingPolicy &Policy) const {
+      return;
+    }
+  }];
+  let Documentation = [Undocumented];
+}
+
+
 def TrivialABI : InheritableAttr {
   // This attribute does not have a C [[]] spelling because it requires the
   // CPlusPlus language option.

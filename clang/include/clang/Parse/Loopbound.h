@@ -28,8 +28,20 @@ struct Loopbound {
   // Expression for the max argument
   Expr *MaxExpr;
 
-  Loopbound()
-      : PragmaNameLoc(nullptr), MinExpr(nullptr), MaxExpr(nullptr) {}
+  Loopbound() : PragmaNameLoc(nullptr), MinExpr(nullptr), MaxExpr(nullptr) {}
+};
+
+/// \brief Quality pragmas.
+struct VarLoopbound {
+  SourceRange Range;
+  IdentifierLoc *PragmaNameLoc;
+  IdentifierLoc *OptionLoc;
+  Expr *MinExpr;
+  Expr *MaxExpr;
+
+  VarLoopbound()
+      : PragmaNameLoc(nullptr), OptionLoc(nullptr), MinExpr(nullptr),
+        MaxExpr(nullptr) {}
 };
 
 } // end namespace clang

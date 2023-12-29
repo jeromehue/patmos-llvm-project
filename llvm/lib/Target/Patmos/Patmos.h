@@ -28,14 +28,19 @@ namespace llvm {
   class formatted_raw_ostream;
   class PassRegistry;
 
+
   void initializePatmosCallGraphBuilderPass(PassRegistry&);
   void initializePatmosStackCacheAnalysisInfoPass(PassRegistry&);
+  void initializePatmosStackCacheAnalysisInfo2Pass(PassRegistry&);
+  void initializePatmosLoopBoundPropagationPass(PassRegistry&);
   void initializePatmosPostRASchedulerPass(PassRegistry&);
   void initializePatmosPMLProfileImportPasS(PassRegistry&);
 
   FunctionPass *createPatmosISelDag(PatmosTargetMachine &TM, llvm::CodeGenOpt::Level OptLevel);
   ModulePass   *createPatmosSPClonePass();
+  ModulePass   *createPatmosLoopBoundReplace();
   ModulePass   *createPatmosSPMarkPass(PatmosTargetMachine &tm);
+  ModulePass   *createTestModulePass(PatmosTargetMachine &tm);
   FunctionPass *createPatmosSinglePathInfoPass(const PatmosTargetMachine &tm);
   FunctionPass *createPatmosSPPreparePass(const PatmosTargetMachine &tm);
   FunctionPass *createPatmosSPBundlingPass(const PatmosTargetMachine &tm);
@@ -52,6 +57,7 @@ namespace llvm {
                                                 bool ForceDisable);
   FunctionPass *createPatmosFunctionSplitterPass(PatmosTargetMachine &tm);
   FunctionPass *createPatmosDelaySlotKillerPass(PatmosTargetMachine &tm);
+  FunctionPass *createPatmosMFReplace(PatmosTargetMachine &tm);
   FunctionPass *createPatmosEnsureAlignmentPass(PatmosTargetMachine &tm);
   FunctionPass *createSinglePathInstructionCounter(const PatmosTargetMachine &tm);
   FunctionPass *createPatmosIntrinsicEliminationPass();
@@ -60,6 +66,8 @@ namespace llvm {
   ModulePass *createPatmosCallGraphBuilder();
   ModulePass *createPatmosStackCacheAnalysis(const PatmosTargetMachine &tm);
   ModulePass *createPatmosStackCacheAnalysisInfo(const PatmosTargetMachine &tm);
+  ModulePass *createPatmosLoopBoundPropagation(const PatmosTargetMachine &tm);
+  ModulePass *createPatmosStackCacheAnalysisInfo2(const PatmosTargetMachine &tm);
   ModulePass *createPatmosModuleExportPass(PatmosTargetMachine &TM,
                                              std::string& Filename,
                                              std::string& BitcodeFilename,

@@ -1048,7 +1048,7 @@ def warn_pragma_invalid_argument : Warning<
 def err_pragma_loopbound_malformed : Error<
   "pragma loopbound is malformed; expecting "
   "'#pragma loopbound min NUM max NUM'">;
-  
+
 def err_pragma_misplaced_in_decl : Error<"this pragma cannot appear in %0 declaration">;
 
 // '#pragma clang section' related errors

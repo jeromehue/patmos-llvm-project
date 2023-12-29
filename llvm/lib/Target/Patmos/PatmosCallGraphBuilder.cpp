@@ -526,11 +526,11 @@ namespace llvm {
     // Mark live nodes to be within SCCs (loops or recursion)
     MCG.markNodesInSCC();
 
-    LLVM_DEBUG(
-        std::error_code tmp;
-      raw_fd_ostream of("mcg.dot", tmp);
-      WriteGraph(of, MCG);
-    );
+    // LLVM_DEBUG(
+    //     std::error_code tmp;
+    //   raw_fd_ostream of("mcg.dot", tmp);
+    //   WriteGraph(of, MCG);
+    // );
 
     return false;
   }

@@ -129,6 +129,10 @@ namespace {
     /// addPreISelPasses - This method should add any "last minute" LLVM->LLVM
     /// passes (which are run just before instruction selector).
     bool addPreISel() override {
+
+      // Deal with premature optimization
+      addPass(createPatmosLoopBoundReplace());
+
       if (PatmosSinglePathInfo::isEnabled()) {
         // Single-path transformation requires a single exit node
         addPass(createUnifyFunctionExitNodesPass());
@@ -141,6 +145,8 @@ namespace {
       // singlepath, so that we can report errors when needed
       addPass(createPatmosIntrinsicEliminationPass());
 
+
+      //addPass(createPatmosLoopBoundPropagation(getPatmosTargetMachine()));
       return PatmosSinglePathInfo::isEnabled();
     }
 
@@ -153,6 +159,11 @@ namespace {
       // unused return values.
       if (getOptLevel() == CodeGenOpt::None) {
         addPass(&DeadMachineInstructionElimID);
+      }
+
+      // if flag -mpatmos-disable-variable-loopbound is passed, then UB
+      if(PatmosSinglePathInfo::useVariableLoopbounds()) {
+        addPass(createPatmosLoopBoundPropagation(getPatmosTargetMachine()));
       }
 
       if (PatmosSinglePathInfo::isConstant()) {
@@ -195,7 +206,7 @@ namespace {
 			addPass(createEquivalenceClassesPass());
 
 			// Assign predicates to instructions and initialize predicate definitions
-        	addPass(createPreRegallocReduce(getPatmosTargetMachine()));
+            addPass(createPreRegallocReduce(getPatmosTargetMachine()));
 
 			addPass(createPatmosSinglePathInfoPass(getPatmosTargetMachine()));
 			if (PatmosSinglePathInfo::isConstant()) {
@@ -262,8 +273,8 @@ namespace {
               addPass(createPatmosConstantLoopDominatorsPass());
               addPass(createOppositePredicateCompensationPass(getPatmosTargetMachine()));
             }
-			addPass(createPatmosSPBundlingPass(getPatmosTargetMachine()));
-			addPass(createPatmosSPReducePass(getPatmosTargetMachine()));
+			    addPass(createPatmosSPBundlingPass(getPatmosTargetMachine()));
+			    addPass(createPatmosSPReducePass(getPatmosTargetMachine()));
         }
         addPass(createSPSchedulerPass(getPatmosTargetMachine()));
       } else {

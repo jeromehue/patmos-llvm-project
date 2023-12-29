@@ -152,6 +152,7 @@ bool PatmosSPMark::runOnModule(Module &M) {
   for(auto fn_iter = M.begin(); fn_iter != M.end(); fn_iter++) {
     Function &F = *fn_iter;
     if (F.hasFnAttribute("sp-root")) {
+      llvm::dbgs() << "Function : " << F.getName() << " has sp-root attribute\n";
       NumSPPseudo++;
       // get the machine-level function
       MachineFunction *MF = MMI->getMachineFunction(F);
@@ -159,19 +160,26 @@ bool PatmosSPMark::runOnModule(Module &M) {
       PatmosMachineFunctionInfo *PMFI =
         MF->getInfo<PatmosMachineFunctionInfo>();
       PMFI->setSinglePath();
-      if(PatmosSinglePathInfo::usePseudoRoots()) PMFI->setSinglePathPseudoRoot();
+      if(PatmosSinglePathInfo::usePseudoRoots()) {
+        PMFI->setSinglePathPseudoRoot();
+      }
       W.push_back(MF);
       NumSPTotal++;
     }
   }
 
   // process worklist
+  LLVM_DEBUG(dbgs() << "[Single-Path] Processing worklist of size : " << W.size() << "\n");
+
   while (!W.empty()) {
     MachineFunction *MF = W.front();
     W.pop_front();
+    LLVM_DEBUG(dbgs() << "Scanning and rewriting call for : " << MF->getName() << "\n");
     scanAndRewriteCalls(MF, W);
   }
+  LLVM_DEBUG(dbgs() << "[Single-Path] Done processing worklist\n");
 
+  LLVM_DEBUG(dbgs() << "[Single-Path] Removing uncalled SP functions\n");
   removeUncalledSPFunctions(M);
 
   LLVM_DEBUG( dbgs() <<
@@ -209,51 +217,69 @@ PatmosSPMark::getCallTargetMFOrAbort(MachineBasicBlock::iterator MI, MachineFunc
 }
 
 void PatmosSPMark::scanAndRewriteCalls(MachineFunction *MF, Worklist &W) {
-  LLVM_DEBUG(dbgs() << "In function '" << MF->getName() << "':\n");
+  LLVM_DEBUG(dbgs() << "Call to scanAndRewriteCalls for function '" << MF->getName() << "':\n");
 
   MachineDominatorTree MDT(*MF);
   MachineLoopInfo LI(MDT);
   ConstantLoopDominators CLD(*MF, LI);
 
-  auto &bounded_doms = CLD.dominators;
 
+
+  auto Name = MF->getName();
+  LLVM_DEBUG(dbgs() << "Dumping dominators for function " << Name << "\n");
+  auto &BoundedDoms = CLD.dominators;
+  CLD.dump();
+
+  // NOTE: Why is this not a for(auto& MBB: *MF) {} loop ?
   for (MachineFunction::iterator MBB = MF->begin(), MBBE = MF->end();
                                  MBB != MBBE; ++MBB) {
     for( MachineBasicBlock::iterator MI = MBB->begin(),
                                      ME = MBB->getFirstTerminator();
                                      MI != ME; ++MI) {
       if (MI->isCall()) {
-        auto *original_target_MF = getCallTargetMFOrAbort(MI,MBB);
+        auto *OriginalTargetMf = getCallTargetMFOrAbort(MI,MBB);
+        LLVM_DEBUG(dbgs() << "    get a call, original target mf : " << OriginalTargetMf->getName() << "\n");
 
-        auto *original_PMFI = original_target_MF->getInfo<PatmosMachineFunctionInfo>();
+        auto *OriginalPMFI = OriginalTargetMf->getInfo<PatmosMachineFunctionInfo>();
 
-        auto pseudo_target = PatmosSinglePathInfo::usePseudoRoots() &&
-                              bounded_doms.begin()->second.count(&*MBB) &&
+        auto PseudoTarget = PatmosSinglePathInfo::usePseudoRoots() &&
+                              BoundedDoms.begin()->second.count(&*MBB) &&
                               MF->getInfo<PatmosMachineFunctionInfo>()->isSinglePathPseudoRoot();
-        if(pseudo_target) {
+        if(PseudoTarget) {
           LLVM_DEBUG(dbgs() << "Call to pseudo-root: "; MI->dump());
+        } else {
+          LLVM_DEBUG(dbgs() << "Call to non-pseudo-root: "; MI->dump());
+          LLVM_DEBUG(dbgs() << "BoundedDoms size " << BoundedDoms.size() << "\n\n\n");
+          for(auto Iter = BoundedDoms.begin(); Iter != BoundedDoms.end(); ++Iter) {
+            llvm::dbgs() << "Printing BoundedDoms key\n";
+            Iter->first->dump();
+          }
+          LLVM_DEBUG(dbgs() << "\n\n\n");
         }
-        rewriteCall(&*MI, pseudo_target);
+        rewriteCall(&*MI, PseudoTarget);
 
-        auto *new_target_MF = getCallTargetMF(&*MI);
-        auto *new_PMFI =
-            new_target_MF->getInfo<PatmosMachineFunctionInfo>();
+        auto *NewTargetMf = getCallTargetMF(&*MI);
+        auto *NewPmfi =
+            NewTargetMf->getInfo<PatmosMachineFunctionInfo>();
         // we possibly have already marked the _sp variant as single-path
         // in an earlier call, if not, then set this final decision.
-        if (!new_PMFI->isSinglePath()) {
-          new_PMFI->setSinglePath();
+        if (!NewPmfi->isSinglePath()) {
+          NewPmfi->setSinglePath();
           // add the new single-path function to the worklist
-          W.push_back(new_target_MF);
+          LLVM_DEBUG(dbgs() << "Pushing new function into worklist " 
+              << NewTargetMf->getName() << "\n");
+          W.push_back(NewTargetMf);
           NumSPTotal++;
 
-          if(pseudo_target) {
-            assert(!new_PMFI->isSinglePathPseudoRoot() && "Pseudo-Root already marked");
-            new_PMFI->setSinglePathPseudoRoot();
+          if(PseudoTarget) {
+            assert(!NewPmfi->isSinglePathPseudoRoot() && "Pseudo-Root already marked");
+            LLVM_DEBUG(dbgs() << "Setting " << NewTargetMf->getName() << " as singlepath pseudoroot ?\n" );
+            NewPmfi->setSinglePathPseudoRoot();
             NumSPPseudo++;
           } else if(PatmosSinglePathInfo::useNewSinglePathTransform()) {
             // Non pseudo-roots use P7 as their enable/disable predicate argument
-            new_target_MF->addLiveIn(Patmos::P7, &Patmos::PRegsRegClass);
-            new_target_MF->begin()->addLiveIn(Patmos::P7);
+            NewTargetMf->addLiveIn(Patmos::P7, &Patmos::PRegsRegClass);
+            NewTargetMf->begin()->addLiveIn(Patmos::P7);
           }
         }
 
@@ -263,6 +289,10 @@ void PatmosSPMark::scanAndRewriteCalls(MachineFunction *MF, Worklist &W) {
 }
 
 void PatmosSPMark::rewriteCall(MachineInstr *MI, bool pseudo_root_target) {
+  LLVM_DEBUG(
+      dbgs() << "Call to rewriteCall with arguments(MI, pseudo_root_target) : " 
+      << *MI << "\n" << pseudo_root_target << "\n";
+      );
   // get current MBB and call target
   MachineBasicBlock *MBB = MI->getParent();
   const Function *Target = getCallTarget(MI);

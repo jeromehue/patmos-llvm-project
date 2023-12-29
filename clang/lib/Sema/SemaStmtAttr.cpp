@@ -19,7 +19,7 @@
 #include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/SemaInternal.h"
 #include "llvm/ADT/StringExtras.h"
-#include <iostream>
+#include "llvm/IR/Instructions.h"
 
 using namespace clang;
 using namespace sema;
@@ -45,8 +45,7 @@ static Attr *handleFallThroughAttr(Sema &S, Stmt *St, const ParsedAttr &A,
 
   // If this is spelled as the standard C++17 attribute, but not in C++17, warn
   // about using it as an extension.
-  if (!S.getLangOpts().CPlusPlus17 && A.isCXX11Attribute() &&
-      !A.getScopeName())
+  if (!S.getLangOpts().CPlusPlus17 && A.isCXX11Attribute() && !A.getScopeName())
     S.Diag(A.getLoc(), diag::ext_cxx17_attr) << A;
 
   FnScope->setHasFallthroughStmt();
@@ -183,6 +182,7 @@ static Attr *handleLoopHintAttr(Sema &S, Stmt *St, const ParsedAttr &A,
 
 static Attr *handleLoopboundAttr(Sema &S, Stmt *St, const ParsedAttr &A,
                                  SourceRange Range) {
+
   Expr *MinExpr = A.getArgAsExpr(0);
   Expr *MaxExpr = A.getArgAsExpr(1);
 
@@ -191,7 +191,7 @@ static Attr *handleLoopboundAttr(Sema &S, Stmt *St, const ParsedAttr &A,
       St->getStmtClass() != Stmt::CXXForRangeStmtClass &&
       St->getStmtClass() != Stmt::WhileStmtClass) {
     S.Diag(St->getBeginLoc(), diag::err_pragma_loop_precedes_nonloop)
-       << "#pragma loopbound";
+        << "#pragma loopbound";
     return nullptr;
   }
 
@@ -206,23 +206,62 @@ static Attr *handleLoopboundAttr(Sema &S, Stmt *St, const ParsedAttr &A,
   auto MinInt = *MinAPS;
   auto MaxInt = *MaxAPS;
 
-  if ( dyn_cast<DoStmt>(St) && MinInt < 1 ) {
+  if (dyn_cast<DoStmt>(St) && MinInt < 1) {
     S.Diag(A.getLoc(), diag::err_pragma_loopbound_invalid_values_do_while);
     return nullptr;
   }
-  if ( MinInt < 0 || MaxInt < 0 || MinInt > MaxInt ) {
+  if (MinInt < 0 || MaxInt < 0 || MinInt > MaxInt) {
     S.Diag(A.getLoc(), diag::err_pragma_loopbound_invalid_values);
     return nullptr;
   }
-  auto int_bits = (sizeof(int)*8);
-  if ( MinInt.getMinSignedBits() > int_bits ||
-       MaxInt.getMinSignedBits() > int_bits ) {
+  auto int_bits = (sizeof(int) * 8);
+  if (MinInt.getMinSignedBits() > int_bits ||
+      MaxInt.getMinSignedBits() > int_bits) {
     S.Diag(A.getLoc(), diag::err_pragma_loopbound_excessive_values);
     return nullptr;
   }
 
-  return ::new (S.Context) LoopBoundAttr(S.Context, A,
-      (int) MinInt.getExtValue(), (int) MaxInt.getExtValue());
+  return ::new (S.Context) LoopBoundAttr(
+      S.Context, A, (int)MinInt.getExtValue(), (int)MaxInt.getExtValue());
+}
+
+// #pragma varloopbound min 0 max V 100
+static Attr *handleVarLoopboundAttr(Sema &S, Stmt *St, const ParsedAttr &A,
+                                    SourceRange Range) {
+
+  // Assert that we are preceeding a loop
+  if (St->getStmtClass() != Stmt::DoStmtClass &&
+      St->getStmtClass() != Stmt::ForStmtClass &&
+      St->getStmtClass() != Stmt::CXXForRangeStmtClass &&
+      St->getStmtClass() != Stmt::WhileStmtClass) {
+    S.Diag(St->getBeginLoc(), diag::err_pragma_loop_precedes_nonloop)
+        << "#pragma varloopbound";
+    return nullptr;
+  }
+
+  IdentifierLoc *PragmaNameLoc = A.getArgAsIdent(0);
+  IdentifierLoc *OptionLoc = A.getArgAsIdent(1);
+  Expr *ValueExpr = nullptr;
+  Expr *ValueExprF = nullptr;
+
+  Expr *MinExpr = A.getArgAsExpr(2);
+  ValueExpr = A.getArgAsExpr(3);
+
+  auto MinAPS = MinExpr->getIntegerConstantExpr(S.Context);
+  auto MinInt = *MinAPS;
+
+  ///VarLoopBoundAttr::OptionType Option;
+  ///// TODO:: Modify the pragma to get only one option,
+  ///// and ultimately remove this option, but this has to be done at the very end
+  ///if(PragmaMax) {
+  ///  Option = VarLoopBoundAttr::Max;
+  ///  ValueExpr = A.getArgAsExpr(3);
+  ///}
+  ///if (!ValueExpr) {
+  ///  printf("Error in Sema getting N\n");
+  ///}
+
+  return VarLoopBoundAttr::CreateImplicit(S.Context, (int) MinInt.getExtValue(), ValueExpr, A.getRange());
 }
 
 namespace {
@@ -471,6 +510,8 @@ static Attr *ProcessStmtAttribute(Sema &S, Stmt *St, const ParsedAttr &A,
     return handleLoopHintAttr(S, St, A, Range);
   case ParsedAttr::AT_LoopBound:
     return handleLoopboundAttr(S, St, A, Range);
+  case ParsedAttr::AT_VarLoopBound:
+    return handleVarLoopboundAttr(S, St, A, Range);
   case ParsedAttr::AT_OpenCLUnrollHint:
     return handleOpenCLUnrollHint(S, St, A, Range);
   case ParsedAttr::AT_Suppress:
@@ -493,7 +534,7 @@ static Attr *ProcessStmtAttribute(Sema &S, Stmt *St, const ParsedAttr &A,
 StmtResult Sema::ProcessStmtAttributes(Stmt *S,
                                        const ParsedAttributesView &AttrList,
                                        SourceRange Range) {
-  SmallVector<const Attr*, 8> Attrs;
+  SmallVector<const Attr *, 8> Attrs;
   for (const ParsedAttr &AL : AttrList) {
     if (Attr *a = ProcessStmtAttribute(*this, S, AL, Range))
       Attrs.push_back(a);

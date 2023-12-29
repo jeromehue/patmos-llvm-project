@@ -108,13 +108,16 @@ void LoopCountInsert::doFunction(MachineFunction &MF){
 
 		auto loop = LI.getLoopFor(&header_mbb);
 		auto loop_bounds = getLoopBounds(&header_mbb);
-		if(!loop_bounds) {
+		auto MaxLoopBoundReg = getVLoopBounds(&header_mbb);
+		if(!loop_bounds && !MaxLoopBoundReg) {
 			report_fatal_error(
 				  "Single-path code generation failed! "
 				  "Loop has no bound. Loop bound expected in the following MBB but was not found: '" +
 				  header_mbb.getName() + "'!");
 		}
-		auto upper_bound = loop_bounds->second;
+		auto UpperBound = 0;
+		if(loop_bounds)
+			UpperBound = loop_bounds->second;
 		DebugLoc DL;
 
 		// Start my making a preheader that will manage the initial counter
@@ -211,10 +214,19 @@ void LoopCountInsert::doFunction(MachineFunction &MF){
 
 			// Initialize counter
 			auto preheader_counter_vreg = MF.getRegInfo().createVirtualRegister(&Patmos::RRegsRegClass);
+			// Casted to false if not initalized properly before
+			if(UpperBound) {
 			BuildMI(*preheader, preheader->getFirstTerminator(), DL,
-				TII->get((isUInt<12>(upper_bound)) ? Patmos::LIi : Patmos::LIl), preheader_counter_vreg)
+				TII->get((isUInt<12>(UpperBound)) ? Patmos::LIi : Patmos::LIl), preheader_counter_vreg)
 				.addReg(Patmos::P0).addImm(0)
-				.addImm(upper_bound);
+				.addImm(UpperBound);
+			} else if (MaxLoopBoundReg.hasValue()) { 
+				// Copy upper bound register to counter v reg
+        BuildMI(*preheader, preheader->getFirstTerminator(), DL,
+                TII->get(Patmos::COPY),
+                preheader_counter_vreg)
+        				.addReg(MaxLoopBoundReg.getValue());
+			}
 
 			// Add a PHI instruction for the loop counter in the header
 			auto counter_vreg = MF.getRegInfo().createVirtualRegister(&Patmos::RRegsRegClass);

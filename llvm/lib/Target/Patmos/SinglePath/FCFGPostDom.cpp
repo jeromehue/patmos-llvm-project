@@ -15,49 +15,50 @@
 
 using namespace llvm;
 
-MachineBasicBlock* FCFGPostDom::outermost_inner_loop_header(MachineLoop *inner) {
-	assert(inner && "Inner loop was null");
+MachineBasicBlock* FCFGPostDom::outermost_inner_loop_header(MachineLoop *Inner) {
+	assert(Inner && "Inner loop was null");
 
-	auto outer_depth = loop? loop->getLoopDepth():0;
+	auto OuterDepth = loop? loop->getLoopDepth():0;
 
-	assert(inner->getLoopDepth() > (outer_depth));
-	while(inner->getLoopDepth() != (outer_depth+1)) {
-		inner = inner->getParentLoop();
+	assert(Inner->getLoopDepth() > (OuterDepth));
+	while(Inner->getLoopDepth() != (OuterDepth+1)) {
+		Inner = Inner->getParentLoop();
 	}
-	assert(loop == inner->getParentLoop());
-	return inner->getHeader();
+	assert(loop == Inner->getParentLoop());
+	return Inner->getHeader();
 }
 
-Optional<MachineBasicBlock*> FCFGPostDom::fcfg_predecessor(MachineBasicBlock *pred) {
-	auto *pred_loop = LI.getLoopFor(pred);
+Optional<MachineBasicBlock*> FCFGPostDom::fcfg_predecessor(MachineBasicBlock *Pred) {
+	auto *PredLoop = LI.getLoopFor(Pred);
 
-	if(pred_loop == loop) {
-		return pred;
-	} else if(!loop || loop->contains(pred)) {
+	if(PredLoop == loop) {
+		return Pred;
+	} 
+	if(!loop || loop->contains(Pred)) {
 		/// Predecessor is in nested loop, use header of outermost inner loop
-		return outermost_inner_loop_header(pred_loop);
-	} else {
-		/// Predecessor is in outer loop
-		return None;
-	}
+		return outermost_inner_loop_header(PredLoop);
+	}  
+	/// Predecessor is in outer loop
+	return None;
+
 }
 
-Optional<MachineBasicBlock*> FCFGPostDom::fcfg_successor(MachineBasicBlock *succ) {
-	auto *succ_loop = LI.getLoopFor(succ);
+Optional<MachineBasicBlock*> FCFGPostDom::fcfg_successor(MachineBasicBlock *Succ) {
+	auto *SuccLoop = LI.getLoopFor(Succ);
 
-	if(succ_loop == loop) {
-		return succ;
-	} else if(!loop || loop->contains(succ)) {
+	if(SuccLoop == loop) {
+		return Succ;
+	} else if(!loop || loop->contains(Succ)) {
 		/// Successor is in nested loop, use header of outermost inner loop
-		return outermost_inner_loop_header(succ_loop);
+		return outermost_inner_loop_header(SuccLoop);
 	} else {
 		/// Successor is in outer loop
 		return None;
 	}
 }
 
-void FCFGPostDom::calculate(std::set<MachineBasicBlock*> roots) {
-	assert(std::all_of(roots.begin(), roots.end(), [&](auto root){
+void FCFGPostDom::calculate(std::set<MachineBasicBlock*> Roots) {
+	assert(std::all_of(Roots.begin(), Roots.end(), [&](auto root){
 		return
 			// Root is a node in the loop
 			LI.getLoopFor(root) == loop ||
@@ -65,143 +66,143 @@ void FCFGPostDom::calculate(std::set<MachineBasicBlock*> roots) {
 			(LI.getLoopFor(root)->getParentLoop() == loop && LI.getLoopFor(root)->getHeader() == root);
 	}) && "All roots not in the same loop");
 
-	std::deque<MachineBasicBlock*> worklist;
+	std::deque<MachineBasicBlock*> Worklist;
 
-	auto add_preds_to_worklist = [&](auto current){
-		std::for_each(current->pred_begin(), current->pred_end(), [&](auto pred){
-			auto fcfg_pred = fcfg_predecessor(pred);
-			if(fcfg_pred) {
-				worklist.push_back(*fcfg_pred);
+	auto AddPredsToWorklist = [&](auto Current){
+		std::for_each(Current->pred_begin(), Current->pred_end(), [&](auto Pred){
+			auto FcfgPred = fcfg_predecessor(Pred);
+			if(FcfgPred) {
+				Worklist.push_back(*FcfgPred);
 			}
 		});
 	};
 
 	// Initial post dominators: roots are only post dominated by themselves
-	for(auto root: roots) {
-		post_doms[root] = {root};
-		add_preds_to_worklist(root);
+	for(auto *Root: Roots) {
+		post_doms[Root] = {Root};
+		AddPredsToWorklist(Root);
 	}
 
-	while(!worklist.empty()) {
-		auto current = worklist.front();
-		worklist.pop_front();
-		if(post_doms.count(current)) {
+	while(!Worklist.empty()) {
+		auto *Current = Worklist.front();
+		Worklist.pop_front();
+		if(post_doms.count(Current)) {
 			// already did it
 			continue;
 		}
 
-		std::set<MachineBasicBlock*> succs;
-		if(LI.isLoopHeader(current) && (!loop || loop->getHeader() != current)) {
+		std::set<MachineBasicBlock*> Succs;
+		if(LI.isLoopHeader(Current) && (!loop || loop->getHeader() != Current)) {
 			// Current is header of inner loop
-			auto currents_loop = LI.getLoopFor(current);
-			assert(currents_loop);
-			assert(currents_loop->getParentLoop() == loop);
+			auto *CurrentsLoop = LI.getLoopFor(Current);
+			assert(CurrentsLoop);
+			assert(CurrentsLoop->getParentLoop() == loop);
 
-			SmallVector<std::pair<MachineBasicBlock*, MachineBasicBlock*>> exits;
-			currents_loop->getExitEdges(exits);
-			for(auto edge: exits) {
-				if(!loop || loop->contains(edge.second)) {
-					succs.insert(edge.second);
+			SmallVector<std::pair<MachineBasicBlock*, MachineBasicBlock*>> Exits;
+			CurrentsLoop->getExitEdges(Exits);
+			for(auto Edge: Exits) {
+				if(!loop || loop->contains(Edge.second)) {
+					Succs.insert(Edge.second);
 				}
 			}
 		} else {
-			std::for_each(current->succ_begin(), current->succ_end(), [&](auto succ){
-				return succs.insert(*fcfg_successor(succ));
+			std::for_each(Current->succ_begin(), Current->succ_end(), [&](auto Succ){
+				return Succs.insert(*fcfg_successor(Succ));
 			});
 		}
 
-		auto all_succs_done = std::all_of(succs.begin(), succs.end(), [&](auto succ){
-			return post_doms.count(succ);
+		auto AllSuccsDone = std::all_of(Succs.begin(), Succs.end(), [&](auto Succ){
+			return post_doms.count(Succ);
 		});
-		if(all_succs_done) {
-			auto doms = post_doms[*succs.begin()];
-			std::for_each(succs.begin(), succs.end(), [&](auto succ){
-				doms = get_intersection(doms, post_doms[succ]);
+		if(AllSuccsDone) {
+			auto Doms = post_doms[*Succs.begin()];
+			std::for_each(Succs.begin(), Succs.end(), [&](auto Succ){
+				Doms = get_intersection(Doms, post_doms[Succ]);
 			});
-			doms.insert(current);
-			post_doms[current] = doms;
-			add_preds_to_worklist(current);
+			Doms.insert(Current);
+			post_doms[Current] = Doms;
+			AddPredsToWorklist(Current);
 		} else {
 			// Wait for all successors to be done
-			worklist.push_back(current);
+			Worklist.push_back(Current);
 		}
 	}
 }
 
 FCFGPostDom::FCFGPostDom(MachineLoop *l, MachineLoopInfo &LI): loop(l), LI(LI){
 	assert(loop);
-	SmallVector<std::pair<MachineBasicBlock*, MachineBasicBlock*>> exits;
-	loop->getExitEdges(exits);
+	SmallVector<std::pair<MachineBasicBlock*, MachineBasicBlock*>> Exits;
+	loop->getExitEdges(Exits);
 
-	std::set<MachineBasicBlock*> roots;
-	for(auto exit: exits) {
-		auto source = exit.first;
-		auto source_loop = LI.getLoopFor(source);
-		if(source_loop != loop) {
-			roots.insert(outermost_inner_loop_header(source_loop));
+	std::set<MachineBasicBlock*> Roots;
+	for(auto Exit: Exits) {
+		auto *Source = Exit.first;
+		auto *SourceLoop = LI.getLoopFor(Source);
+		if(SourceLoop != loop) {
+			Roots.insert(outermost_inner_loop_header(SourceLoop));
 		} else {
-			roots.insert(source);
+			Roots.insert(Source);
 		}
 	}
 
 	// add the latches to the roots
-	SmallVector<MachineBasicBlock*> latches;
-	loop->getLoopLatches(latches);
-	for(auto latch: latches) {
-		roots.insert(latch);
+	SmallVector<MachineBasicBlock*> Latches;
+	loop->getLoopLatches(Latches);
+	for(auto *Latch: Latches) {
+		Roots.insert(Latch);
 	}
 
-	calculate(roots);
-	for(auto inner: *loop) {
-		inner_doms.push_back(FCFGPostDom(inner, LI));
+	calculate(Roots);
+	for(auto *Inner: *loop) {
+		inner_doms.push_back(FCFGPostDom(Inner, LI));
 	}
 }
 
-void FCFGPostDom::get_post_dominees(MachineBasicBlock *dominator, std::set<MachineBasicBlock*> &dominees) {
-	for(auto entry: post_doms) {
-		if(entry.second.count(dominator)){
-			dominees.insert(entry.first);
+void FCFGPostDom::get_post_dominees(MachineBasicBlock *Dominator, std::set<MachineBasicBlock*> &Dominees) {
+	for(auto Entry: post_doms) {
+		if(Entry.second.count(Dominator)){
+			Dominees.insert(Entry.first);
 		}
 	}
 
-	for(auto inner: inner_doms) {
-		inner.get_post_dominees(dominator, dominees);
+	for(auto Inner: inner_doms) {
+		Inner.get_post_dominees(Dominator, Dominees);
 	}
 }
 
 FCFGPostDom::FCFGPostDom(MachineFunction &MF, MachineLoopInfo &LI) : loop(nullptr), LI(LI){
-	auto is_end = [&](auto &block){return block.succ_size() == 0;};
-	assert(std::count_if(MF.begin(), MF.end(), is_end) == 1 && "Found multiple end blocks");
-	auto end = std::find_if(MF.begin(), MF.end(), is_end);
+	auto IsEnd = [&](auto &Block){return Block.succ_size() == 0;};
+	assert(std::count_if(MF.begin(), MF.end(), IsEnd) == 1 && "Found multiple end blocks");
+	auto End = std::find_if(MF.begin(), MF.end(), IsEnd);
 
-	calculate({&*end});
-	for(auto inner: LI) {
-		inner_doms.push_back(FCFGPostDom(inner, LI));
+	calculate({&*End});
+	for(auto *Inner: LI) {
+		inner_doms.push_back(FCFGPostDom(Inner, LI));
 	}
 }
 
-void FCFGPostDom::print(raw_ostream &O, unsigned indent) {
-	if(indent == 0) O << "Post Dominators:\n";
-	for(auto entry: post_doms) {
-		auto block = entry.first;
-		auto dominees = entry.second;
+void FCFGPostDom::print(raw_ostream &O, unsigned Indent) {
+	if(Indent == 0) O << "Post Dominators:\n";
+	for(auto Entry: post_doms) {
+		auto *Block = Entry.first;
+		auto Dominees = Entry.second;
 
-		for(int i = 0; i<indent; i++) O << "\t";
-		O << "bb." << block->getNumber() << ": [";
-		for(auto dominee: dominees) {
-			O << "bb." << dominee->getNumber() << ", ";
+		for(int I = 0; I<Indent; I++) O << "\t";
+		O << "bb." << Block->getNumber() << ": [";
+		for(auto *Dominee: Dominees) {
+			O << "bb." << Dominee->getNumber() << ", ";
 		}
 		O << "]\n";
 	}
-	for(auto inner: inner_doms) {
-		inner.print(O, indent+1);
+	for(auto Inner: inner_doms) {
+		Inner.print(O, Indent+1);
 	}
 }
 
 bool FCFGPostDom::post_dominates(MachineBasicBlock *dominator, MachineBasicBlock *dominee) {
 	return post_doms[dominee].count(dominator) ||
 		std::any_of(inner_doms.begin(), inner_doms.end(),
-			[&](auto inner){ return inner.post_dominates(dominator, dominee);});
+			[&](auto Inner){ return Inner.post_dominates(dominator, dominee);});
 }
 
 void FCFGPostDom::get_control_dependencies(std::map<
@@ -209,54 +210,54 @@ void FCFGPostDom::get_control_dependencies(std::map<
 		MachineBasicBlock*,
 		// Set of {Y->Z} control dependencies of X
 		std::set<std::pair<Optional<MachineBasicBlock*>,MachineBasicBlock*>>
-	> &deps) {
-	for(auto entry: post_doms) {
-		auto block = entry.first;
+	> &Deps) {
+	for(auto Entry: post_doms) {
+		auto *Block = Entry.first;
 
-		std::set<MachineBasicBlock*> dominees;
-		get_post_dominees(block, dominees);
+		std::set<MachineBasicBlock*> Dominees;
+		get_post_dominees(Block, Dominees);
 		// If mbb post-dominates a block, any of its predecessors that mbb does not dominate must therefore
 		// be a control dependency of mbb
-		for(auto dominee: dominees){
-			auto dominee_loop = LI.getLoopFor(dominee);
+		for(auto *Dominee: Dominees){
+			auto *DomineeLoop = LI.getLoopFor(Dominee);
 
-			if(dominee->pred_size() == 0 || (loop && loop->getHeader() == dominee)) {
+			if(Dominee->pred_size() == 0 || (loop && loop->getHeader() == Dominee)) {
 				// dominee is the entry to the loop (header).
 				// If you post dominate the entry, you are control dependent on the entry edge
-				deps[block].insert(std::make_pair(None, dominee));
+				Deps[Block].insert(std::make_pair(None, Dominee));
 			} else {
-				std::for_each(dominee->pred_begin(), dominee->pred_end(), [&](auto pred){
-					auto fcfg_pred = fcfg_predecessor(pred);
-					assert(fcfg_pred && "Predecessor is header or entry");
+				std::for_each(Dominee->pred_begin(), Dominee->pred_end(), [&](auto Pred){
+					auto FcfgPred = fcfg_predecessor(Pred);
+					assert(FcfgPred && "Predecessor is header or entry");
 
-					if (!post_dominates(block, *fcfg_pred)) {
-						auto fcfg_predecessor_loop = LI.getLoopFor(*fcfg_pred);
+					if (!post_dominates(Block, *FcfgPred)) {
+						auto FcfgPredecessorLoop = LI.getLoopFor(*FcfgPred);
 
-						if(fcfg_predecessor_loop != loop) {
+						if(FcfgPredecessorLoop != loop) {
 							// the predecessor is a loop header. Use the loop's exit edges as the dep edge
-							SmallVector<std::pair<MachineBasicBlock*, MachineBasicBlock*>> exits;
-							fcfg_predecessor_loop->getExitEdges(exits);
+							SmallVector<std::pair<MachineBasicBlock*, MachineBasicBlock*>> Exits;
+							FcfgPredecessorLoop->getExitEdges(Exits);
 
-							for(auto exit: exits) {
-								if(exit.second == dominee) {
-									deps[block].insert(std::make_pair(exit.first, dominee));
+							for(auto Exit: Exits) {
+								if(Exit.second == Dominee) {
+									Deps[Block].insert(std::make_pair(Exit.first, Dominee));
 								}
 							}
 						} else {
-							assert(fcfg_pred);
-							deps[block].insert(std::make_pair(fcfg_pred, dominee));
+							assert(FcfgPred);
+							Deps[Block].insert(std::make_pair(FcfgPred, Dominee));
 						}
 					}
 				});
 			}
 		}
 	}
-	for(auto inner: inner_doms) {
-		inner.get_control_dependencies(deps);
+	for(auto Inner: inner_doms) {
+		Inner.get_control_dependencies(Deps);
 	}
 
 	assert(
-		std::all_of(deps.begin(), deps.end(), [&](auto entry){
+		std::all_of(Deps.begin(), Deps.end(), [&](auto entry){
 			return std::all_of(entry.second.begin(), entry.second.end(), [&](auto edge){
 				if(edge.first) {
 					// Edge exists

@@ -16,18 +16,25 @@
 #include "CodeGenModule.h"
 #include "TargetInfo.h"
 #include "clang/AST/Attr.h"
+#include "clang/AST/Attrs.inc"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/PrettyStackTrace.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/Lex/Lexer.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/SaveAndRestore.h"
 
 using namespace clang;
@@ -758,6 +765,34 @@ void CodeGenFunction::EmitIfStmt(const IfStmt &S) {
   EmitBlock(ContBlock, true);
 }
 
+static std::string getExprAsString(Expr* expr, const SourceManager& SM, const LangOptions& langOpts) {
+    SourceRange range = expr->getSourceRange();
+
+    // Get the source location information
+    SourceLocation startLoc = range.getBegin();
+    SourceLocation endLoc = range.getEnd();
+
+    // Get the source text
+    const char* startChar = SM.getCharacterData(startLoc);
+    const char* endChar = SM.getCharacterData(endLoc);
+
+    // Calculate the length of the source text
+    size_t length = endChar - startChar + Lexer::MeasureTokenLength(endLoc, SM, langOpts);
+
+    // Extract the source code
+    StringRef sourceCode(startChar, length);
+
+    // Convert the StringRef to std::string
+    return sourceCode.str();
+}
+
+
+std::string trimEnd(std::string s) {
+   s.erase(std::find_if(s.rbegin(), s.rend(), 
+       [](unsigned char c) { return !std::isspace(c) && c != '\0'; }).base(), s.end());
+   return s;
+}
+
 void CodeGenFunction::EmitLoopBounds(
    llvm::BasicBlock *BB,
    const ArrayRef<const Attr *> &Attrs,
@@ -766,9 +801,139 @@ void CodeGenFunction::EmitLoopBounds(
   auto *F = BB->getParent();
   auto &Context = BB->getContext();
   auto is_bound = [](auto attr){ return dyn_cast<LoopBoundAttr>(attr); };
+  auto is_varbound = [](auto attr){ return dyn_cast<VarLoopBoundAttr>(attr); };
 
   assert(std::count_if(Attrs.begin(), Attrs.end(), is_bound) <= 1 &&
       "We don't support multiple bounds on the same loop");
+
+  assert(std::count_if(Attrs.begin(), Attrs.end(), is_varbound) <= 1 &&
+      "We don't support multiple bounds on the same loop");
+
+  // Look for any varloopbound attribute
+  const auto *foundVarBound = std::find_if(Attrs.begin(), Attrs.end(), is_varbound);
+
+  if (foundVarBound != Attrs.end()) {
+    auto *VarBound = dyn_cast<VarLoopBoundAttr>(*foundVarBound);
+    auto min = one_higher ? VarBound->getMin() : VarBound->getMin()-1;
+    
+
+
+    ASTContext& AC = CGM.getContext();
+    //Expr::EvalResult EvalResult;
+    Expr *ValueExpr = VarBound->getMax();
+    auto LBV = getExprAsString(ValueExpr, AC.getSourceManager(), AC.getLangOpts());
+    auto loopboundVariable = trimEnd(LBV);
+    
+    llvm::AllocaInst* allocaBound = nullptr;
+    llvm::StoreInst* storeBound = nullptr;
+
+    // Looking for an alloca operation
+    for(auto& Function: CGM.getModule()) {
+      Function.dump();
+      for(auto& Basic: Function) {
+        for(auto& Instr: Basic) {
+          if(isa<llvm::AllocaInst>(Instr) && Instr.getName() == loopboundVariable) {
+            allocaBound = dyn_cast<llvm::AllocaInst>(&Instr);
+          }
+        }
+      }
+    }
+    
+    // Looking for a store operation
+    for(auto& Function: CGM.getModule()) {
+      for(auto& BB: Function) {
+        for(auto& Instr: BB) {
+          if(isa<llvm::StoreInst>(Instr)) {
+            if(Instr.getOperand(0)->getName().str() == loopboundVariable) {
+              storeBound = dyn_cast<llvm::StoreInst>(&Instr);
+            }
+          }
+        }
+      }
+    }
+
+    // Create llvm.loop.bound no matter what
+    auto *loop_bound_fn = F->getParent()->getFunction("llvm.loop.bound");
+    std::vector<llvm::Type*> BoundTypes(2, llvm::Type::getInt32Ty(Context));
+    auto *FT = llvm::FunctionType::get(llvm::Type::getVoidTy(Context), BoundTypes, false);
+    if(!loop_bound_fn){
+      loop_bound_fn = llvm::Function::Create(FT, llvm::Function::ExternalLinkage,
+           "llvm.loop.bound", F->getParent());
+      // We add attributes that ensure optimizations don't mess with the bounds
+      loop_bound_fn->addFnAttr(llvm::Attribute::Convergent);
+      loop_bound_fn->addFnAttr(llvm::Attribute::NoDuplicate);
+      loop_bound_fn->addFnAttr(llvm::Attribute::NoInline);
+      loop_bound_fn->addFnAttr(llvm::Attribute::NoRecurse);
+      loop_bound_fn->addFnAttr(llvm::Attribute::NoMerge);
+      loop_bound_fn->addFnAttr(llvm::Attribute::OptimizeNone);
+    }
+
+    //assert((storeBound or allocaBound) and "Neither store nor alloca found");
+
+    if(storeBound) {
+      llvm::Value *MinVal = llvm::ConstantInt::get(Int32Ty, min);
+      llvm::Value *MaxVal = storeBound->getOperand(0);
+
+      auto *loop_varbound_fn = F->getParent()->getFunction("llvm.loop.varbound");
+      std::vector<llvm::Type*> BoundTypes(2, llvm::Type::getInt32Ty(Context));
+
+      auto *FT = llvm::FunctionType::get(llvm::Type::getVoidTy(Context), BoundTypes, false);
+      if(!loop_varbound_fn){
+        loop_varbound_fn = llvm::Function::Create(FT, llvm::Function::ExternalLinkage,
+             "llvm.loop.varbound", F->getParent());
+        // We add attributes that ensure optimizations don't mess with the bounds
+        loop_varbound_fn->addFnAttr(llvm::Attribute::Convergent);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoDuplicate);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoInline);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoRecurse);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoMerge);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::OptimizeNone);
+      }
+
+      auto *call_inst = llvm::CallInst::Create(FT, loop_varbound_fn, {MinVal, MaxVal});
+      BB->getInstList().insertAfter(std::prev(BB->end(),2), call_inst);
+    }
+
+    
+    if(allocaBound) {
+      llvm::Value *MinVal = llvm::ConstantInt::get(Int32Ty, min);
+      llvm::Value *V = allocaBound; 
+
+      /// LLVM Magic
+      CharUnits AlignmentInCharUnits = CharUnits::fromQuantity(allocaBound->getAlignment());
+      Address arg = Address(V, AlignmentInCharUnits);
+
+      // We operate on a load instruction, and we pass a llvm::value* to the function call creator
+      // Thus we can try to determine if there is a store
+      llvm::LoadInst *incomingErrorValue = Builder.CreateLoad(arg);
+      llvm::Value* MaxValue = incomingErrorValue;
+
+      // TODO: This has to be a llvm.loop.varbound
+      auto *loop_varbound_fn = F->getParent()->getFunction("llvm.loop.varbound");
+      std::vector<llvm::Type*> BoundTypes(2, llvm::Type::getInt32Ty(Context));
+
+      auto *FT = llvm::FunctionType::get(llvm::Type::getVoidTy(Context), BoundTypes, false);
+      if(!loop_varbound_fn){
+        loop_varbound_fn = llvm::Function::Create(FT, llvm::Function::ExternalLinkage,
+             "llvm.loop.varbound", F->getParent());
+        // We add attributes that ensure optimizations don't mess with the bounds
+        loop_varbound_fn->addFnAttr(llvm::Attribute::Convergent);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoDuplicate);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoInline);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoRecurse);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoMerge);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::OptimizeNone);
+      }
+      auto *call_inst = llvm::CallInst::Create(FT, loop_varbound_fn, {MinVal, incomingErrorValue});
+
+      // Emit before terminator
+      //BB->getInstList().insertAfter(std::prev(BB->end(),2), incomingErrorValue);
+
+      BB->getInstList().insertAfter(std::prev(BB->end(),3), call_inst);
+      incomingErrorValue->moveBefore(call_inst);
+    }
+  }
+
 
   // Look for any loopbound attribute
   auto foundLB = std::find_if(Attrs.begin(), Attrs.end(), is_bound);
@@ -777,6 +942,7 @@ void CodeGenFunction::EmitLoopBounds(
 
     auto min = one_higher ? LB->getMin() : LB->getMin()-1;
     auto max = LB->getMax() - LB->getMin();
+
 
     llvm::Value *MinVal = llvm::ConstantInt::get(Int32Ty, min);
     llvm::Value *MaxVal = llvm::ConstantInt::get(Int32Ty, max);

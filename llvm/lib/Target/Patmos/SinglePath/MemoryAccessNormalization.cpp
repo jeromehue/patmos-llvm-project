@@ -71,6 +71,9 @@ static unsigned countAccesses(const MachineBasicBlock *mbb){
 /// the header of a loop
 static std::pair<uint64_t,uint64_t> getLoopBoundMax(const MachineBasicBlock *mbb){
   auto bounds = getLoopBounds(mbb);
+  if(!bounds) {
+    return std::make_pair((uint64_t) 1, (uint64_t) 20);
+  }
   assert(bounds && "No bounds were given");
   return *bounds;
 }

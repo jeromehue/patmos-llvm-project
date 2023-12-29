@@ -90,6 +90,12 @@ static cl::opt<bool> DisableCountlessLoops(
     cl::desc("Forces single-path code to use counters on all loops to ensure constant iteration counts."),
     cl::Hidden);
 
+static cl::opt<bool> DisableVariableLoopBounds(
+    "mpatmos-disable-variable-loopbounds",
+    cl::init(false),
+    cl::desc("Disables the use of variable loop bounds via the varloopbound pragma."),
+    cl::Hidden);
+
 ///////////////////////////////////////////////////////////////////////////////
 
 char PatmosSinglePathInfo::ID = 0;
@@ -185,6 +191,10 @@ bool PatmosSinglePathInfo::useNewSinglePathTransform(){
 
 bool PatmosSinglePathInfo::useCountlessLoops(){
 	return !DisableCountlessLoops;
+}
+
+bool PatmosSinglePathInfo::useVariableLoopbounds() {
+  return !DisableVariableLoopBounds;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

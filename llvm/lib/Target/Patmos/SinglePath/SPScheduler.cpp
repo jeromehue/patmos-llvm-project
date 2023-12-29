@@ -331,7 +331,7 @@ void SPScheduler::runListSchedule(MachineBasicBlock *mbb) {
   // so if it's there, move it to the end of the instruction list
   // so its skipped
   auto found_loopbound = std::find_if(mbb->instr_begin(), mbb->instr_end(), [&](auto &instr) {
-    return instr.getOpcode() == Patmos::PSEUDO_LOOPBOUND;
+    return (instr.getOpcode() == Patmos::PSEUDO_LOOPBOUND or instr.getOpcode() == Patmos::V_PSEUDO_LOOPBOUND);
   });
   bool was_loopbound = false;
   if (found_loopbound != mbb->instr_end()) {

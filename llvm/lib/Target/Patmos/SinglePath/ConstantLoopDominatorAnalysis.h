@@ -365,52 +365,52 @@ static std::tuple<
 	ReachMap<MachineBasicBlock> // key Reachable from value
 >
 constantLoopDominatorsAnalysisImpl(
-		const MachineBasicBlock *start_mbb,
+		const MachineBasicBlock *StartMbb,
 		const MachineLoopInfo *LI,
-		bool (*constantBounds)(const MachineBasicBlock *mbb)
+		bool (*ConstantBounds)(const MachineBasicBlock *Mbb)
 ) {
-	LLVM_DEBUG(dbgs() << "\nStarting Bounded Dominator Analysis: "<< start_mbb->getName() << "\n");
-	DomMap<MachineBasicBlock> dominators;
+	LLVM_DEBUG(dbgs() << "\nStarting Bounded Dominator Analysis: "<< StartMbb->getName() << "\n");
+	DomMap<MachineBasicBlock> Dominators;
 	// Set of nodes in each loop that dominates the loop header
-	DomMap<MachineBasicBlock> loop_dominators;
-	ReachMap<MachineBasicBlock> reachable_from;
-	LoopMap<MachineBasicBlock, ReachMap<MachineBasicBlock>> loop_reachable_from;
-	auto current_loop = LI->getLoopFor(start_mbb);
+	DomMap<MachineBasicBlock> LoopDominators;
+	ReachMap<MachineBasicBlock> ReachableFrom;
+	LoopMap<MachineBasicBlock, ReachMap<MachineBasicBlock>> LoopReachableFrom;
+	auto CurrentLoop = LI->getLoopFor(StartMbb);
 
 
 	// Returns whether the given block is a header of an inner loop (assuming it is in the current loop).
-	auto is_fcfg_header = [&](const MachineBasicBlock *block) {
-		assert(!current_loop || current_loop->contains(block));
-		return block != start_mbb && LI->isLoopHeader(block);
+	auto IsFcfgHeader = [&](const MachineBasicBlock *Block) {
+		assert(!CurrentLoop || CurrentLoop->contains(Block));
+		return Block != StartMbb && LI->isLoopHeader(Block);
 	};
-	auto rev_topo = fcfg_topo_sort(start_mbb, LI);
+	auto RevTopo = fcfg_topo_sort(StartMbb, LI);
 
-	while (!rev_topo.empty()) {
-		auto *current = rev_topo.back();
-		rev_topo.pop_back();
+	while (!RevTopo.empty()) {
+		auto *current = RevTopo.back();
+		RevTopo.pop_back();
 
 		LLVM_DEBUG(
 			dbgs() << "\nCurrent: " << current->getName() << "\n";
-			for(auto end: dominators){
+			for(auto end: Dominators){
 				dbgs() << end.first->getName() << ": ";
 				dump_mbb_list(dbgs(), end.second) << "\n";
 			}
 		);
 
 		// If loop header, analyze recursively
-		if (is_fcfg_header(current)) {
-			assert(!loop_dominators.count(current) && "Loop already recursively handled");
+		if (IsFcfgHeader(current)) {
+			assert(!LoopDominators.count(current) && "Loop already recursively handled");
 			LLVM_DEBUG(dbgs() << "Header block: " << current->getName() << "\n");
-			auto loop_result = constantLoopDominatorsAnalysisImpl(current, LI,constantBounds);
+			auto LoopResult = constantLoopDominatorsAnalysisImpl(current, LI,ConstantBounds);
 
 			// If dominates header, dominates all
 			// If doesn't dominate header, dominates none
-			loop_dominators[current] =  std::get<1>(loop_result);
-			loop_reachable_from[current] = std::get<2>(loop_result);
+			LoopDominators[current] =  std::get<1>(LoopResult);
+			LoopReachableFrom[current] = std::get<2>(LoopResult);
 
 			LLVM_DEBUG(
 				dbgs() << "Loop dominators for " << current->getName() << ": ";
-				for(auto dom: loop_dominators[current]) {
+				for(auto dom: LoopDominators[current]) {
 					dbgs() << dom->getName() << ", ";
 				}
 				dbgs() << "\n";
@@ -420,111 +420,111 @@ constantLoopDominatorsAnalysisImpl(
 		LLVM_DEBUG(
 			dbgs() << "\nNext: " << current->getName() <<"\n";
 			dbgs() << "FCFG pred: [";
-			for(auto pred: fcfg_predecessors(current, start_mbb, LI)){
+			for(auto pred: fcfg_predecessors(current, StartMbb, LI)){
 				dbgs() << pred->getName() <<", ";
 			}
 			dbgs() << "]\n"
 		);
 
-		Optional<std::set<const MachineBasicBlock*>> pred_doms_intersect;
-		for (auto pred : fcfg_predecessors(current, start_mbb, LI)) {
-			assert(dominators.count(pred) && "Predecessor hasn't been handled");
+		Optional<std::set<const MachineBasicBlock*>> PredDomsIntersect;
+		for (auto Pred : fcfg_predecessors(current, StartMbb, LI)) {
+			assert(Dominators.count(Pred) && "Predecessor hasn't been handled");
 
-			if (pred_doms_intersect) {
-				pred_doms_intersect = get_intersection(
-					*pred_doms_intersect,
-					dominators[pred]
+			if (PredDomsIntersect) {
+				PredDomsIntersect = get_intersection(
+					*PredDomsIntersect,
+					Dominators[Pred]
 				);
 			} else {
-				pred_doms_intersect = dominators[pred];
+				PredDomsIntersect = Dominators[Pred];
 			}
 		}
 
-		if (pred_doms_intersect) {
-			dominators[current] = *pred_doms_intersect;
+		if (PredDomsIntersect) {
+			Dominators[current] = *PredDomsIntersect;
 		}
 
 		// Self dominant if const header (or not header)
-		if(!is_fcfg_header(current) || constantBounds(current)) {
-			if(is_fcfg_header(current)) {
-				dominators[current].insert(loop_dominators[current].begin(), loop_dominators[current].end());
+		if(!IsFcfgHeader(current) || ConstantBounds(current)) {
+			if(IsFcfgHeader(current)) {
+				Dominators[current].insert(LoopDominators[current].begin(), LoopDominators[current].end());
 			}
-			dominators[current].insert(current);
+			Dominators[current].insert(current);
 		}
 
 		// Update reachability
-		reachable_from[current].insert(current);
-		for (auto pred : fcfg_predecessors(current, start_mbb, LI)) {
-			if (is_fcfg_header(pred)) {
-				assert(loop_reachable_from.count(pred) && "Predecessor loop not handled");
+		ReachableFrom[current].insert(current);
+		for (auto pred : fcfg_predecessors(current, StartMbb, LI)) {
+			if (IsFcfgHeader(pred)) {
+				assert(LoopReachableFrom.count(pred) && "Predecessor loop not handled");
 				auto pred_loop = LI->getLoopFor(pred);
 				assert(pred_loop);
 				SmallVector<std::pair<MachineBasicBlock*, MachineBasicBlock*>> exits;
 				pred_loop->getExitEdges(exits);
 				for (auto exit : exits) {
 					if(exit.second == current) {
-						reachable_from[current].insert(loop_reachable_from[pred][exit.first].begin(), loop_reachable_from[pred][exit.first].end());
+						ReachableFrom[current].insert(LoopReachableFrom[pred][exit.first].begin(), LoopReachableFrom[pred][exit.first].end());
 					}
 				}
 			}
-			reachable_from[current].insert(reachable_from[pred].begin(), reachable_from[pred].end());
+			ReachableFrom[current].insert(ReachableFrom[pred].begin(), ReachableFrom[pred].end());
 		}
 
 		// Remove any dominators between exits
-		remove_if(dominators[current], [&](auto dom){
-			return should_exclude_from_dom(dom, current, start_mbb, reachable_from, loop_reachable_from, LI);
+		remove_if(Dominators[current], [&](auto dom){
+			return should_exclude_from_dom(dom, current, StartMbb, ReachableFrom, LoopReachableFrom, LI);
 		});
 	}
 
 	// Extract dominators of block within loops into result
-	for (auto loop_doms : loop_dominators) {
+	for (auto loop_doms : LoopDominators) {
 		auto header = loop_doms.first;
 		auto header_loop = LI->getLoopFor(header);
 		assert(header_loop);
 
 		std::for_each(header_loop->block_begin(),header_loop->block_end(), [&](auto block){
-			dominators[block] = dominators[header];
-			reachable_from[block] = reachable_from[header];
-			reachable_from[block].insert(
-				loop_reachable_from[header][block].begin(),
-				loop_reachable_from[header][block].end()
+			Dominators[block] = Dominators[header];
+			ReachableFrom[block] = ReachableFrom[header];
+			ReachableFrom[block].insert(
+				LoopReachableFrom[header][block].begin(),
+				LoopReachableFrom[header][block].end()
 			);
 		});
 	}
 
 	Optional<std::set<const MachineBasicBlock*>> unilatch_doms;
-	if(current_loop){
+	if(CurrentLoop){
 		SmallVector<MachineBasicBlock*> latches;
-		current_loop->getLoopLatches(latches);
+		CurrentLoop->getLoopLatches(latches);
 		for(auto latch: latches) {
 			if(unilatch_doms) {
-				unilatch_doms = get_intersection(*unilatch_doms, dominators[latch]);
+				unilatch_doms = get_intersection(*unilatch_doms, Dominators[latch]);
 			} else {
-				unilatch_doms = dominators[latch];
+				unilatch_doms = Dominators[latch];
 			}
 		}
 		assert(unilatch_doms);
 
 		// Use nullptr to signify the unilatch and add it to the reachability sets.
 		// All block can reach the unilatch by definition.
-		reachable_from[nullptr].insert(nullptr);
-		for(auto block: reachable_from) {
-			reachable_from[nullptr].insert(block.first);
+		ReachableFrom[nullptr].insert(nullptr);
+		for(auto block: ReachableFrom) {
+			ReachableFrom[nullptr].insert(block.first);
 		}
 
 		// Remove any dominators between nested exits
 		remove_if(*unilatch_doms, [&](auto dom){
 			return should_exclude_from_dom(dom, (const MachineBasicBlock*) nullptr,
-					start_mbb, reachable_from, loop_reachable_from, LI);
+					StartMbb, ReachableFrom, LoopReachableFrom, LI);
 		});
 
 		// Remove nullptr from reachbility set such that it can't be seen in parent loop
-		reachable_from.erase(nullptr);
+		ReachableFrom.erase(nullptr);
 	}
 
 	LLVM_DEBUG(
-		dbgs() << "\nConstant-Loop Dominator Analysis Results: " << start_mbb->getName() << "\n";
-		for(auto end: dominators){
+		dbgs() << "\nConstant-Loop Dominator Analysis Results: " << StartMbb->getName() << "\n";
+		for(auto end: Dominators){
 			dbgs() << end.first->getName() << ": ";
 			dump_mbb_list(dbgs(), end.second) << "\n";
 		}
@@ -536,7 +536,7 @@ constantLoopDominatorsAnalysisImpl(
 			dbgs() << "\n";
 		}
 		dbgs() << "Path map:\n";
-		for(auto entry: reachable_from) {
+		for(auto entry: ReachableFrom) {
 			dbgs() << entry.first->getName() << ": ";
 			dump_mbb_list(dbgs(), entry.second) << "\n";
 		}
@@ -545,7 +545,7 @@ constantLoopDominatorsAnalysisImpl(
 		unilatch_doms = std::set<const MachineBasicBlock*>();
 	}
 
-	return std::make_tuple(dominators, *unilatch_doms, reachable_from);
+	return std::make_tuple(Dominators, *unilatch_doms, ReachableFrom);
 }
 
 /// Performs a constant-loop dominator analysis, where the bounds of loops are taken into account.
@@ -573,29 +573,29 @@ template<
 >
 DomMap<MachineBasicBlock>
 constantLoopDominatorsAnalysis(
-		const MachineBasicBlock *start_mbb,
+		const MachineBasicBlock *StartMBB,
 		const MachineLoopInfo *LI,
 		bool (*constantBounds)(const MachineBasicBlock *mbb),
-		bool end_doms_only = true
+		bool EndDomsOnly = true
 ) {
-	assert(start_mbb->pred_size() == 0
+	assert(StartMBB->pred_size() == 0
 							&& "Should only be used on function entry");
-	auto dominators =
-		std::get<0>(constantLoopDominatorsAnalysisImpl(start_mbb, LI,constantBounds));
+	auto Dominators =
+		std::get<0>(constantLoopDominatorsAnalysisImpl(StartMBB, LI,constantBounds));
 
-	if (end_doms_only) {
+	if (EndDomsOnly) {
 
 		LLVM_DEBUG(dbgs() << "End dominators only\n");
 		DomMap<MachineBasicBlock> end_doms;
-		for (auto entry : dominators) {
-			auto block = entry.first;
-			if (block->succ_size() == 0) {
-				end_doms[block] = dominators[block];
+		for (auto Entry : Dominators) {
+			auto Block = Entry.first;
+			if (Block->succ_size() == 0) {
+				end_doms[Block] = Dominators[Block];
 			}
 		}
-		dominators = end_doms;
+		Dominators = end_doms;
 	}
-	return dominators;
+	return Dominators;
 }
 
 }
