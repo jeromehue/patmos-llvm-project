@@ -1,4 +1,5 @@
 ; RUN: EXEC_ARGS="0=1 1=1 2=2 9=9 10=10"; \
+; RUN: WITH_DEBUG=true; \
 ; RUN: %test_execution
 ; END.
 ;//////////////////////////////////////////////////////////////////////////////////////////////////
@@ -28,7 +29,7 @@ do.body:                                          ; preds = %do.cond, %entry
   %y.0 = phi i32 [ 0, %entry ], [ %add, %do.cond ]
   %0 = load volatile i32, i32* @_1
   %add = add nsw i32 %y.0, %0
-  call void @llvm.loop.bound(i32 0, i32 9)
+  call void @llvm.loop.varbound(i32 0, i32 %x)
   br label %do.cond
 
 do.cond:                                          ; preds = %do.body
@@ -39,4 +40,4 @@ do.end:                                           ; preds = %do.cond
   ret i32 %add
 }
 
-declare void @llvm.loop.bound(i32, i32)
+declare void @llvm.loop.varbound(i32, i32)
