@@ -182,7 +182,6 @@ static Attr *handleLoopHintAttr(Sema &S, Stmt *St, const ParsedAttr &A,
 
 static Attr *handleLoopboundAttr(Sema &S, Stmt *St, const ParsedAttr &A,
                                  SourceRange Range) {
-
   Expr *MinExpr = A.getArgAsExpr(0);
   Expr *MaxExpr = A.getArgAsExpr(1);
 
@@ -223,6 +222,29 @@ static Attr *handleLoopboundAttr(Sema &S, Stmt *St, const ParsedAttr &A,
 
   return ::new (S.Context) LoopBoundAttr(
       S.Context, A, (int)MinInt.getExtValue(), (int)MaxInt.getExtValue());
+}
+
+
+// pragma fullloopbound min EXPR max EXPR
+static Attr *handleFullLoopboundAttr(Sema &S, Stmt *St, const ParsedAttr &A,
+                                 SourceRange Range) {
+
+  Expr *MinExpr = A.getArgAsExpr(0);
+  Expr *MaxExpr = A.getArgAsExpr(1);
+
+  if (St->getStmtClass() != Stmt::DoStmtClass &&
+      St->getStmtClass() != Stmt::ForStmtClass &&
+      St->getStmtClass() != Stmt::CXXForRangeStmtClass &&
+      St->getStmtClass() != Stmt::WhileStmtClass) {
+    S.Diag(St->getBeginLoc(), diag::err_pragma_loop_precedes_nonloop)
+        << "#pragma varloopbound";
+    return nullptr;
+  }
+
+  assert(MinExpr != nullptr && MaxExpr != nullptr);
+
+  return ::new (S.Context) FullLoopBoundAttr(
+      S.Context, A, MinExpr, MaxExpr);
 }
 
 // #pragma varloopbound min 0 max V 100
@@ -512,6 +534,8 @@ static Attr *ProcessStmtAttribute(Sema &S, Stmt *St, const ParsedAttr &A,
     return handleLoopboundAttr(S, St, A, Range);
   case ParsedAttr::AT_VarLoopBound:
     return handleVarLoopboundAttr(S, St, A, Range);
+  case ParsedAttr::AT_FullLoopBound:
+    return handleFullLoopboundAttr(S, St, A, Range);
   case ParsedAttr::AT_OpenCLUnrollHint:
     return handleOpenCLUnrollHint(S, St, A, Range);
   case ParsedAttr::AT_Suppress:

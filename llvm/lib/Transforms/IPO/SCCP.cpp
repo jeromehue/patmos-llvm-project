@@ -41,8 +41,7 @@ namespace {
 class IPSCCPLegacyPass : public ModulePass {
 public:
   static char ID;
-
-  IPSCCPLegacyPass() : ModulePass(ID) {
+IPSCCPLegacyPass() : ModulePass(ID) {
     initializeIPSCCPLegacyPassPass(*PassRegistry::getPassRegistry());
   }
 

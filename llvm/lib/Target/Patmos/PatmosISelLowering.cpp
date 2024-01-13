@@ -354,6 +354,9 @@ PatmosTargetLowering::LowerCall(CallLoweringInfo &CLI,
                         DAG.getTargetConstant(cast<ConstantSDNode>(OutVals[1].getNode())->getZExtValue(),dl, MVT::i32)};
       return DAG.getNode(PatmosISD::LOOP_BOUND, dl, VTs, Ops);
     } if (G->getGlobal()->getName() == "llvm.loop.varbound") {
+  
+      LLVM_DEBUG(dbgs() << "Lowering call to llvm.loop.varbound\n");
+
       // Define everything
       SelectionDAG &DAG = CLI.DAG;
       SmallVector<SDValue, 32> &OutVals = CLI.OutVals;
@@ -363,6 +366,7 @@ PatmosTargetLowering::LowerCall(CallLoweringInfo &CLI,
       SDValue Chain = CLI.Chain;
       SDValue nChain;
       const SDLoc dl = CLI.DL;
+
 
       // In case LLVM has optimized our second argument
       if(dyn_cast<ConstantSDNode>(OutVals[1].getNode())){
@@ -379,7 +383,6 @@ PatmosTargetLowering::LowerCall(CallLoweringInfo &CLI,
         }
       }
 
-      // FIXME: DO the same thing as for the first case (llvm.loop.bound) and returns
 
       // The trick is to act as if we were calling a function, 
       // to get the register holding the loop bound.
@@ -398,23 +401,41 @@ PatmosTargetLowering::LowerCall(CallLoweringInfo &CLI,
       }
 
       assert(RegsToPass.size() > 0);
-     
+      LLVM_DEBUG(dbgs() << "Register "; OutVals[0].dump());
+      LLVM_DEBUG(dbgs() << "Register "; OutVals[1].dump());
+
+
       SDValue MaxLoopBoundRegister;
       if (OutVals.size() == 2) {
         MaxLoopBoundRegister = SDValue(OutVals[1].getOperand(1).getNode(), 0);
-        MaxLoopBoundRegister.dump();
+        LLVM_DEBUG(dbgs() << "MaxLoopBoundRegister "; MaxLoopBoundRegister.dump());
       }
 
+
       SDVTList VTs = CLI.DAG.getVTList(MVT::Other, MVT::Glue);
-      SDValue Ops[] = {
+
+      if(isa<ConstantSDNode>(OutVals[0].getNode())) {
+        SDValue Ops[] = {
           CLI.Chain,
           CLI.DAG.getTargetConstant(
               cast<ConstantSDNode>(CLI.OutVals[0].getNode())->getZExtValue(),
               CLI.DL, MVT::i32),
           MaxLoopBoundRegister
-      };
+        };
+        return CLI.DAG.getNode(PatmosISD::V_LOOP_BOUND, CLI.DL, VTs, Ops);
+      } else {
+        // FIXME: Add a check here, that we have a register for OutVals[0]
+        SDValue MinLoopBoundRegister = SDValue(OutVals[0].getOperand(1).getNode(), 0);
+        LLVM_DEBUG(dbgs() << "MinLoopBoundRegister "; MinLoopBoundRegister.dump());
+        LLVM_DEBUG(dbgs() << "Lowering call to llvm.loop.varbound : returning DAG node\n");
+        SDValue Ops[] = {
+          CLI.Chain,
+          MinLoopBoundRegister,
+          MaxLoopBoundRegister
+        };
+        return CLI.DAG.getNode(PatmosISD::F_LOOP_BOUND, CLI.DL, VTs, Ops);
+      }
       
-      return CLI.DAG.getNode(PatmosISD::V_LOOP_BOUND, CLI.DL, VTs, Ops);
     }
   }
 

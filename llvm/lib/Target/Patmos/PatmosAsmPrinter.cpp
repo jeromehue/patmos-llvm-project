@@ -201,7 +201,9 @@ void PatmosAsmPrinter::emitInstruction(const MachineInstr *MI) {
     assert(Size == MI->getBundleSize() && "Corrupt Bundle!");
   }
   else {
-    if (MI->getOpcode() == Patmos::PSEUDO_LOOPBOUND or MI->getOpcode() == Patmos::V_PSEUDO_LOOPBOUND) {
+    if (MI->getOpcode() == Patmos::PSEUDO_LOOPBOUND 
+        or MI->getOpcode() == Patmos::V_PSEUDO_LOOPBOUND
+        or MI->getOpcode() == Patmos::F_PSEUDO_LOOPBOUND) {
       return;
     }
     BundleMIs.push_back(MI);

@@ -1,9 +1,8 @@
-; RUN: EXEC_ARGS="0=0 1=10 2=0 3=12 4=0"; \
+; RUN: EXEC_ARGS="0=12 1=14 2=16 3=18 4=20"; \
 ; RUN: WITH_DEBUG=true; \
 ; RUN: %test_execution
 ; END.
 
-@_0 = global i32 0
 @_1 = global i32 1
 @_5 = global i32 5
 
@@ -26,25 +25,27 @@ end:
   ret i32 %x.add
 }
 
+define i32 @func1(i32 %x) {
+  %res = call i32 @add_to(i32 %x, i32 9, i32 10)
+  ret i32 %res
+}
+
+define i32 @func2(i32 %x) {
+  %res = call i32 @add_to(i32 %x, i32 3, i32 4)
+  ret i32 %res
+}
 
 define i32 @main(i32 %x)  {
 entry:
-  %is_odd = trunc i32 %x to i1
-  ;%0 = call i32 @add_to(i32 %x, i32 9, i32 10)
-  br i1 %is_odd, label %if.then, label %if.else
+  %bound = load i32, i32* @_5
+  ;%res1 = call i32 @add_to(i32 %x, i32 9, i32 10)
+  ;%res2 = call i32 @add_to(i32 %x, i32 3, i32 4)
+  %res1 = call i32 @func1(i32 %x)
+  %res2 = call i32 @func2(i32 %x)
+  ; x + 9 + x + 3 = 2x+12
+  %res = add i32 %res1, %res2
 
-if.then:
-  %res.then = call i32 @add_to(i32 %x, i32 9, i32 10)
-  br label %end
-
-if.else:
-  %res.else = load volatile i32, i32* @_0
-  br label %end
-
-end:
-  %result = phi i32 [%res.then, %if.then], [%res.else, %if.else]
-  ret i32 %result
+  ret i32 %res
 }
 
 declare void @llvm.loop.varbound(i32, i32)
-;declare void @llvm.loop.bound(i32, i32)

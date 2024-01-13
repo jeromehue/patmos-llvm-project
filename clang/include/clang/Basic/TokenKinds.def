@@ -874,8 +874,8 @@ PRAGMA_ANNOTATION(pragma_loop_hint)
 // The lexer produces these so that they only take effect when the parser
 // handles #pragma loopbound ... directives.
 PRAGMA_ANNOTATION(pragma_loopbound)
-
- PRAGMA_ANNOTATION(pragma_varloopbound)
+PRAGMA_ANNOTATION(pragma_varloopbound)
+PRAGMA_ANNOTATION(pragma_fullloopbound)
 
 PRAGMA_ANNOTATION(pragma_fp)
 

@@ -17,6 +17,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
 
@@ -48,98 +49,142 @@ template <
   typename InsertEpilogue
 >
 static void eliminate(
-    Function &F, BasicBlock &BB, BasicBlock::iterator instr_iter, uint64_t len, uint32_t increment,
-    InsertEntry insert_at_entry,
-    InsertCondition insert_at_condition,
-    InsertBody insert_at_body,
-    InsertEpilogue insert_at_epilogue,
-    StringRef label_prefix
+    Function &F, BasicBlock &BB, BasicBlock::iterator instr_iter, llvm::Value* lenVal, uint32_t increment,
+    InsertEntry InsertAtEntry,
+    InsertCondition InsertAtCondition,
+    InsertBody InsertAtBody,
+    InsertEpilogue InsertAtEpilogue,
+    StringRef LabelPrefix
 ) {
-  IRBuilder<> builder(F.getContext());
 
+  // Create IR Builder
+  IRBuilder<> Builder(F.getContext());
+
+  uint64_t len;
+  bool LenIsConst = false;
+
+  // Check if length argument is a constant
+  if(auto* memcpy_len = dyn_cast<ConstantInt>(lenVal)) {
+    len = memcpy_len->getValue().getLimitedValue(std::numeric_limits<uint32_t>::max());
+    LenIsConst = true;
+  }
+
+  // Assert length of memcpy is in limites
   if(len == std::numeric_limits<uint32_t>::max())
-    report_fatal_error(label_prefix + " length argument is too large");
+    report_fatal_error(LabelPrefix + " length argument is too large");
 
-  auto loop_bound = len/increment;
-  auto epilogue_len = len % increment;
+  // Create Basic Blocks for the loop
+  auto *MemsetEntry = BasicBlock::Create(F.getContext(), LabelPrefix + ".entry", &F);
+  auto *MemsetLoopCond = BasicBlock::Create(F.getContext(), LabelPrefix + ".loop.cond", &F);
+  auto *MemsetLoopBody = BasicBlock::Create(F.getContext(), LabelPrefix + ".loop.body", &F);
+  auto *MemsetLoopEnd = BasicBlock::Create(F.getContext(), LabelPrefix + ".loop.end", &F);
 
-  auto *memset_entry = BasicBlock::Create(F.getContext(), label_prefix + ".entry", &F);
-  auto *memset_loop_cond = BasicBlock::Create(F.getContext(), label_prefix + ".loop.cond", &F);
-  auto *memset_loop_body = BasicBlock::Create(F.getContext(), label_prefix + ".loop.body", &F);
-  auto *memset_loop_end = BasicBlock::Create(F.getContext(), label_prefix + ".loop.end", &F);
+  Builder.SetInsertPoint(MemsetEntry);
+  RetEntry EntryRet = InsertAtEntry(Builder, MemsetEntry);
 
-  builder.SetInsertPoint(memset_entry);
-  RetEntry entry_ret = insert_at_entry(builder, memset_entry);
+  BranchInst::Create(MemsetLoopCond, MemsetEntry);
 
-  BranchInst::Create(memset_loop_cond, memset_entry);
+  Builder.SetInsertPoint(MemsetLoopCond);
 
-  builder.SetInsertPoint(memset_loop_cond);
 
-  auto *i_phi = builder.CreatePHI(builder.getInt32Ty(), 2, label_prefix + ".i");
-  i_phi->addIncoming(builder.getInt32(loop_bound), memset_entry);
 
-  RetCondition condition_ret = insert_at_condition(builder, memset_entry, entry_ret, memset_loop_cond);
+  // Compute loop bound
+  auto LoopBound = len/increment;
+  auto EpilogueLen = len % increment;
 
-  auto *i_cmp = builder.CreateICmpEQ(i_phi, ConstantInt::get(builder.getInt32Ty(), 0), label_prefix + ".loop.finished");
-
-  // Set loop bound for generated loop
-  auto *loop_bound_fn = F.getParent()->getFunction("llvm.loop.bound");
-  if(!loop_bound_fn) {
-    // Loop bound function not declared yet. Declare it.
-    std::vector<Type*> BoundTypes(2, Type::getInt32Ty(F.getContext()));
-    FunctionType *FT = FunctionType::get(Type::getVoidTy(F.getContext()), BoundTypes, false);
-    loop_bound_fn = Function::Create(FT, Function::ExternalLinkage, "llvm.loop.bound", F.getParent());
+  auto *IPhi = Builder.CreatePHI(Builder.getInt32Ty(), 2, LabelPrefix + ".i");
+  if(LenIsConst) {
+    IPhi->addIncoming(Builder.getInt32(LoopBound), MemsetEntry);
+  } else {
+    IPhi->addIncoming(lenVal, MemsetEntry);
   }
-  builder.CreateCall(loop_bound_fn, {builder.getInt32(loop_bound), builder.getInt32(loop_bound)});
 
-  auto *cond_br = BranchInst::Create(memset_loop_end, memset_loop_body, i_cmp, memset_loop_cond);
+  RetCondition ConditionRet = InsertAtCondition(Builder, MemsetEntry, EntryRet, MemsetLoopCond);
 
-  builder.SetInsertPoint(memset_loop_body);
+  auto *ICmp = Builder.CreateICmpEQ(IPhi, ConstantInt::get(Builder.getInt32Ty(), 0), LabelPrefix + ".loop.finished");
 
-  auto *i_dec = builder.CreateSub(i_phi, builder.getInt32(1), label_prefix + ".i.decremented");
-  i_phi->addIncoming(i_dec, memset_loop_body);
+  if(LenIsConst) {
+    auto *LoopBoundFn = F.getParent()->getFunction("llvm.loop.bound");
+    if(!LoopBoundFn) {
+      // Loop bound function not declared yet. Declare it.
+      std::vector<Type*> BoundTypes(2, Type::getInt32Ty(F.getContext()));
+      FunctionType *FT = FunctionType::get(Type::getVoidTy(F.getContext()), BoundTypes, false);
+      LoopBoundFn = Function::Create(FT, Function::ExternalLinkage, "llvm.loop.bound", F.getParent());
+    }
+    Builder.CreateCall(LoopBoundFn, {Builder.getInt32(LoopBound), Builder.getInt32(LoopBound)});
 
-  insert_at_body(builder, memset_entry, entry_ret, memset_loop_cond, condition_ret, memset_loop_body);
+  } else {
+    // Set loop bound for generated loop
+    auto *VarLoopBoundFn = F.getParent()->getFunction("llvm.loop.varbound");
 
-  BranchInst::Create(memset_loop_cond, memset_loop_body);
+    if(!VarLoopBoundFn) {
+      std::vector<Type*> BoundTypes(2, Type::getInt32Ty(F.getContext()));
+      FunctionType *FT = FunctionType::get(Type::getVoidTy(F.getContext()), BoundTypes, false);
+      VarLoopBoundFn = Function::Create(FT, Function::ExternalLinkage, "llvm.loop.varbound", F.getParent());
+    }
 
-  if(epilogue_len) {
-    builder.SetInsertPoint(memset_loop_end);
+    Builder.CreateCall(VarLoopBoundFn, {Builder.getInt32(0), lenVal});
+  }
+  
+
+
+
+  auto *CondBr = BranchInst::Create(MemsetLoopEnd, MemsetLoopBody, ICmp, MemsetLoopCond);
+
+  Builder.SetInsertPoint(MemsetLoopBody);
+
+  auto *IDec = Builder.CreateSub(IPhi, Builder.getInt32(1), LabelPrefix + ".i.decremented");
+  IPhi->addIncoming(IDec, MemsetLoopBody);
+
+  InsertAtBody(Builder, MemsetEntry, EntryRet, MemsetLoopCond, ConditionRet, MemsetLoopBody);
+
+  BranchInst::Create(MemsetLoopCond, MemsetLoopBody);
+
+  if(EpilogueLen) {
+    Builder.SetInsertPoint(MemsetLoopEnd);
     // Need epilogue
-    insert_at_epilogue(builder,
-        memset_entry, entry_ret,
-        memset_loop_cond, condition_ret,
-        memset_loop_body, memset_loop_end, epilogue_len);
+    InsertAtEpilogue(Builder,
+        MemsetEntry, EntryRet,
+        MemsetLoopCond, ConditionRet,
+        MemsetLoopBody, MemsetLoopEnd, EpilogueLen);
   }
-  builder.SetInsertPoint((BasicBlock*)NULL);
+  Builder.SetInsertPoint((BasicBlock*)NULL);
 
   // Replace llvm.memset
-  auto *successor = BB.splitBasicBlock(instr_iter, "llvm.memset" + BB.getName() + ".continued");
+  auto *Successor = BB.splitBasicBlock(instr_iter, "llvm.memset" + BB.getName() + ".continued");
 
   // Point the first half of the original block to the memset blocks
-  cast<BranchInst>(BB.back()).setSuccessor(0, memset_entry);
+  cast<BranchInst>(BB.back()).setSuccessor(0, MemsetEntry);
 
   // If the original block has a loop bound instruction, ensure it is put in the previous half
-  for(auto instr_iter = successor->begin(); instr_iter != successor->end(); instr_iter++){
-    if(instr_iter->getOpcode() == Instruction::Call || instr_iter->getOpcode() == Instruction::CallBr){
-      if (CallInst *II = dyn_cast<CallInst>(&*instr_iter)) {
+  for(auto InstrIter = Successor->begin(); InstrIter != Successor->end(); InstrIter++){
+    if(InstrIter->getOpcode() == Instruction::Call || InstrIter->getOpcode() == Instruction::CallBr){
+      if (CallInst *II = dyn_cast<CallInst>(&*InstrIter)) {
         auto *called = II->getCalledFunction();
         if(called && called->getName() == "llvm.loop.bound"){
-          builder.SetInsertPoint(&*std::prev(BB.end()));
-          builder.CreateCall(called, {II->getArgOperand(0), II->getArgOperand(1)});
-          builder.SetInsertPoint((BasicBlock*)NULL);
-          successor->getInstList().erase(instr_iter);
+          Builder.SetInsertPoint(&*std::prev(BB.end()));
+          Builder.CreateCall(called, {II->getArgOperand(0), II->getArgOperand(1)});
+          Builder.SetInsertPoint((BasicBlock*)NULL);
+          Successor->getInstList().erase(InstrIter);
           break;
         }
       }
     }
   }
 
-  assert(isa<IntrinsicInst>(successor->begin())); // This should be the call to intrinsic
-  successor->getInstList().pop_front(); // remove the intrinsic call
+  assert(isa<IntrinsicInst>(Successor->begin())); // This should be the call to intrinsic
+  Successor->getInstList().pop_front(); // remove the intrinsic call
 
-  BranchInst::Create(successor, memset_loop_end);
+  BranchInst::Create(Successor, MemsetLoopEnd);
 }
+
+
+
+
+
+
+
+
 
 /// Checks that the given llvm.memset/memcpy is valid and should be eliminated.
 /// If so, calls the given lambda (which is assumed to then call 'eliminate').
@@ -159,11 +204,13 @@ static bool eliminate_mem_intrinsic(Function &F, IntrinsicInst *II, StringRef na
 
     if(len <= 12) return false; // Too small to be worth it
 
-    should_eliminate_call(arg0, arg2, len);
+    should_eliminate_call(arg0, arg2, arg2);
     return true;
   } else {
     if (PatmosSinglePathInfo::isEnabled(F)) {
-      report_fatal_error(name + " length argument not a constant value");
+      should_eliminate_call(arg0, arg2, arg2);
+      //report_fatal_error("LoopBound variable cannot be proven constant");
+      return true;
     }
   }
   return false;
@@ -181,6 +228,7 @@ static bool eliminateIntrinsic(Function &F, BasicBlock &BB) {
       if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(&instr)) {
         switch (II->getIntrinsicID()) {
         case Intrinsic::memcpy: {
+          llvm::errs() << " eliminating memcpy\n";
           auto arg1 = II->getArgOperand(1);
 
           assert(cast<PointerType>(arg1->getType())->getAddressSpace() == 0);

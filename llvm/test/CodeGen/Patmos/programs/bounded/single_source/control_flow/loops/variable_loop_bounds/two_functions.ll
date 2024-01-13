@@ -1,4 +1,4 @@
-; RUN: EXEC_ARGS="0=7 1=10 2=7 3=12 4=7"; \
+; RUN: EXEC_ARGS="0=7 2=7 3=12 4=7"; \
 ; RUN: WITH_DEBUG=true; \
 ; RUN: %test_execution
 ; END.

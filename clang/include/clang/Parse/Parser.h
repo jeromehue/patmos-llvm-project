@@ -20,6 +20,7 @@
 #include "clang/Basic/Specifiers.h"
 #include "clang/Lex/CodeCompletionHandler.h"
 #include "clang/Lex/Preprocessor.h"
+#include "clang/Parse/Loopbound.h"
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/SmallVector.h"
@@ -197,6 +198,7 @@ class Parser : public CodeCompletionHandler {
   std::unique_ptr<PragmaHandler> LoopHintHandler;
   std::unique_ptr<PragmaHandler> LoopboundHandler;
   std::unique_ptr<PragmaHandler> VarLoopboundHandler;
+  std::unique_ptr<PragmaHandler> FullLoopboundHandler;
   std::unique_ptr<PragmaHandler> QualityHandler;
   std::unique_ptr<PragmaHandler> UnrollHintHandler;
   std::unique_ptr<PragmaHandler> NoUnrollHintHandler;
@@ -766,6 +768,10 @@ private:
   void HandlePragmaLoopbound(Loopbound &LB);
 
   bool HandlePragmaVarLoopbound(VarLoopbound &Hint);
+
+  /// \brief Handle the annotation token produced for
+  /// #pragma fullloopbound
+  void HandlePragmaFullLoopbound(FullLoopbound &FLB);
 
   bool ParsePragmaAttributeSubjectMatchRuleSet(
       attr::ParsedSubjectMatchRuleSet &SubjectMatchRules,
@@ -2074,6 +2080,9 @@ private:
                                      ParsedStmtContext StmtCtx,
                                      SourceLocation *TrailingElseLoc,
                                      ParsedAttributesWithRange &Attrs);
+  StmtResult ParsePragmaFullLoopbound(StmtVector &Stmts, ParsedStmtContext StmtCtx,
+                                  SourceLocation *TrailingElseLoc,
+                                  ParsedAttributesWithRange &Attrs);
 
   /// Describes the behavior that should be taken for an __if_exists
   /// block.

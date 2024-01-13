@@ -802,6 +802,7 @@ void CodeGenFunction::EmitLoopBounds(
   auto &Context = BB->getContext();
   auto is_bound = [](auto attr){ return dyn_cast<LoopBoundAttr>(attr); };
   auto is_varbound = [](auto attr){ return dyn_cast<VarLoopBoundAttr>(attr); };
+  auto is_fullbound = [](auto attr){ return dyn_cast<FullLoopBoundAttr>(attr); };
 
   assert(std::count_if(Attrs.begin(), Attrs.end(), is_bound) <= 1 &&
       "We don't support multiple bounds on the same loop");
@@ -809,8 +810,146 @@ void CodeGenFunction::EmitLoopBounds(
   assert(std::count_if(Attrs.begin(), Attrs.end(), is_varbound) <= 1 &&
       "We don't support multiple bounds on the same loop");
 
-  // Look for any varloopbound attribute
+  assert(std::count_if(Attrs.begin(), Attrs.end(), is_fullbound) <= 1 &&
+      "We don't support multiple bounds on the same loop");
+
   const auto *foundVarBound = std::find_if(Attrs.begin(), Attrs.end(), is_varbound);
+  const auto *foundFullBound = std::find_if(Attrs.begin(), Attrs.end(), is_fullbound);
+
+  if(foundFullBound != Attrs.end()) {
+
+    auto *FullBound = dyn_cast<FullLoopBoundAttr>(*foundFullBound);
+    llvm::outs() << "  Here we are!";
+
+    ASTContext& AC = CGM.getContext();
+
+    Expr *MinExpr = FullBound->getMin();
+    auto MinLoopBoundVariable =  getExprAsString(MinExpr, AC.getSourceManager(), AC.getLangOpts());
+
+    Expr *MaxExpr = FullBound->getMax();
+    auto MaxLoopBoundVariable =  getExprAsString(MaxExpr, AC.getSourceManager(), AC.getLangOpts());
+
+    // Looking to where our variable was defined
+    llvm::AllocaInst* MinAllocaBound = nullptr;
+    llvm::StoreInst* MinStoreBound = nullptr;
+    llvm::AllocaInst* MaxAllocaBound = nullptr;
+    llvm::StoreInst* MaxStoreBound = nullptr;
+
+
+    // Finding minimum
+    for(auto& Instr: llvm::instructions(F)) {
+        if(isa<llvm::AllocaInst>(&Instr) && Instr.getName() == MinLoopBoundVariable)
+          MinAllocaBound = dyn_cast<llvm::AllocaInst>(&Instr);
+
+        if(isa<llvm::AllocaInst>(&Instr) && Instr.getName() == MaxLoopBoundVariable)
+          MaxAllocaBound = dyn_cast<llvm::AllocaInst>(&Instr);
+
+    }
+
+    // Finding maximum
+    for(auto& Instr: llvm::instructions(F)) {
+      if(isa<llvm::StoreInst>(&Instr) && Instr.getOperand(0)->getName().str() == MinLoopBoundVariable)
+        MinStoreBound = dyn_cast<llvm::StoreInst>(&Instr);
+
+      if(isa<llvm::StoreInst>(&Instr) && Instr.getOperand(0)->getName().str() == MaxLoopBoundVariable)
+        MaxStoreBound = dyn_cast<llvm::StoreInst>(&Instr);
+    }
+
+    assert((MinAllocaBound != nullptr or MinStoreBound != nullptr) and "Variable loop bound not found in function");
+    assert((MaxAllocaBound != nullptr or MaxStoreBound != nullptr) and "Variable loop bound not found in function");
+
+    // Variables specified can be :
+    // 1. Allocated on the stack
+    // 2. Part of the global variables
+    // 3. Arguments of the function
+
+    // Declare our llvm.loop.varbound function, if it still hasn't been created
+    auto *loop_varbound_fn = F->getParent()->getFunction("llvm.loop.varbound");
+    std::vector<llvm::Type*> BoundTypes(2, llvm::Type::getInt32Ty(Context));
+    auto *FT = llvm::FunctionType::get(llvm::Type::getVoidTy(Context), BoundTypes, false);
+
+    if(!loop_varbound_fn){
+        loop_varbound_fn = llvm::Function::Create(FT, llvm::Function::ExternalLinkage,
+             "llvm.loop.varbound", F->getParent());
+        // We add attributes that ensure optimizations don't mess with the bounds
+        loop_varbound_fn->addFnAttr(llvm::Attribute::Convergent);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoDuplicate);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoInline);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoRecurse);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::NoMerge);
+        loop_varbound_fn->addFnAttr(llvm::Attribute::OptimizeNone);
+      }
+
+    //for(auto& Arg: F->args()) {
+    //  Arg.dump();
+    //  if(Arg.getName() == MaxLoopBoundVariable) {
+    //    llvm::outs() << " LB in arg list of function.\n";
+    //  }
+    //}
+
+    // Case 1
+    if(MinAllocaBound && MaxStoreBound) { 
+      llvm::Value *MinVal = MinAllocaBound; 
+      llvm::Value *MaxVal = MaxStoreBound->getOperand(0);
+
+      Address Addr = Address(MinVal, CharUnits::fromQuantity(MinAllocaBound->getAlignment()));
+      llvm::LoadInst *LoadMin = Builder.CreateLoad(Addr);
+      llvm::Value* MinValue = LoadMin;
+
+      auto *CallInst = llvm::CallInst::Create(FT, loop_varbound_fn, {MinValue, MaxVal});
+      BB->getInstList().insertAfter(std::prev(BB->end(),3), CallInst);
+      LoadMin->moveBefore(CallInst);
+    }
+
+
+    // Case 2
+    if(MinAllocaBound && MaxAllocaBound) { 
+      llvm::outs() << " Double alloca\n";
+
+      llvm::Value *MinVal = MinAllocaBound; 
+      llvm::Value *MaxVal = MaxAllocaBound;
+
+      Address AddrMin = Address(MinVal, CharUnits::fromQuantity(MinAllocaBound->getAlignment()));
+      llvm::LoadInst *LoadMin = Builder.CreateLoad(AddrMin);
+      llvm::Value* MinValue = LoadMin;
+
+      Address AddrMax = Address(MaxVal, CharUnits::fromQuantity(MaxAllocaBound->getAlignment()));
+      llvm::LoadInst *LoadMax = Builder.CreateLoad(AddrMax);
+      llvm::Value* MaxValue = LoadMax;
+
+      auto *CallInst = llvm::CallInst::Create(FT, loop_varbound_fn, {MinValue, MaxValue});
+      BB->getInstList().insertAfter(std::prev(BB->end(),4), CallInst);
+      LoadMin->moveBefore(CallInst);
+      LoadMax->moveBefore(CallInst);
+    }
+
+
+    // Case 3
+    if(MinStoreBound && MaxAllocaBound) { 
+      llvm::Value *MinVal = MinStoreBound->getOperand(0); 
+      llvm::Value *MaxVal = MaxAllocaBound;
+
+      Address Addr = Address(MaxVal, CharUnits::fromQuantity(MaxAllocaBound->getAlignment()));
+      llvm::LoadInst *LoadMax = Builder.CreateLoad(Addr);
+      llvm::Value* MaxValue = LoadMax;
+
+      auto *CallInst = llvm::CallInst::Create(FT, loop_varbound_fn, {MinVal, MaxValue});
+      BB->getInstList().insertAfter(std::prev(BB->end(),3), CallInst);
+      LoadMax->moveBefore(CallInst);
+    }
+
+    // Case 4
+    if(MinStoreBound && MaxStoreBound) { 
+      llvm::Value *MinVal = MinStoreBound->getOperand(0); 
+      llvm::Value *MaxVal = MaxStoreBound->getOperand(0); 
+
+      auto *CallInst = llvm::CallInst::Create(FT, loop_varbound_fn, {MinVal, MaxVal});
+      BB->getInstList().insertAfter(std::prev(BB->end(),2), CallInst);
+    }
+
+    // TODO: remove this dump
+    F->dump();
+  }
 
   if (foundVarBound != Attrs.end()) {
     auto *VarBound = dyn_cast<VarLoopBoundAttr>(*foundVarBound);
@@ -827,7 +966,7 @@ void CodeGenFunction::EmitLoopBounds(
     llvm::AllocaInst* allocaBound = nullptr;
     llvm::StoreInst* storeBound = nullptr;
 
-    // Looking for an alloca operation
+    // Looking for an alloca operation, could be optimized by not looking through all the code ?
     for(auto& Function: CGM.getModule()) {
       Function.dump();
       for(auto& Basic: Function) {
@@ -943,9 +1082,9 @@ void CodeGenFunction::EmitLoopBounds(
     auto min = one_higher ? LB->getMin() : LB->getMin()-1;
     auto max = LB->getMax() - LB->getMin();
 
-
     llvm::Value *MinVal = llvm::ConstantInt::get(Int32Ty, min);
     llvm::Value *MaxVal = llvm::ConstantInt::get(Int32Ty, max);
+
 
     auto *loop_bound_fn = F->getParent()->getFunction("llvm.loop.bound");
     std::vector<llvm::Type*> BoundTypes(2, llvm::Type::getInt32Ty(Context));

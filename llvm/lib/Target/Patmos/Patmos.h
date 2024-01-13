@@ -55,6 +55,8 @@ namespace llvm {
   FunctionPass *createSPSchedulerPass(const PatmosTargetMachine &tm);
   FunctionPass *createPatmosDelaySlotFillerPass(const PatmosTargetMachine &tm,
                                                 bool ForceDisable);
+  FunctionPass *createPatmosDataflowVarLoopbound(const PatmosTargetMachine &tm,
+                                                bool ForceDisable);
   FunctionPass *createPatmosFunctionSplitterPass(PatmosTargetMachine &tm);
   FunctionPass *createPatmosDelaySlotKillerPass(PatmosTargetMachine &tm);
   FunctionPass *createPatmosMFReplace(PatmosTargetMachine &tm);

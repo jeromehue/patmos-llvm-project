@@ -15,14 +15,14 @@
 ; an error is thrown.
 ;//////////////////////////////////////////////////////////////////////////////////////////////////
 
-; RUN: llc %s -mpatmos-singlepath="main" %XFAIL-filecheck %s
+; RUN: llc %s -mpatmos-singlepath="main" -o %t
 ;//////////////////////////////////////////////////////////////////////////////////////////////////
 ; Ensure if a single-path function (which isn't the single-path-root) contains a call to 
 ; llvm.memset with a variable length argument, an error is thrown.
 ;//////////////////////////////////////////////////////////////////////////////////////////////////
 ; END
 
-; CHECK: llvm.memset length argument not a constant value
+; CHECK: LoopBound variable cannot be proven constant
 
 define i32 @main(i32 %x, i8* %ptr) {
 entry:

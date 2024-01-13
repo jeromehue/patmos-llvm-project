@@ -37,6 +37,14 @@ Optional<std::pair<uint64_t, uint64_t>> getLoopBounds(const MachineBasicBlock * 
 /// is available in the given block.
 Optional<Register> getVLoopBounds(const MachineBasicBlock * MBB);
 
+Optional<Register> getMininumIterationCountRegister(const MachineBasicBlock * MBB);
+
+Optional<Register> getMaximumIterationCountRegister(const MachineBasicBlock * MBB);
+
+/// Extracts loop bound information from the (V|F)_PSEUDO_LOOPBOUND instruction
+/// if available in the given block
+Optional<std::pair<Optional<Register>, Register>> getVariableLoopBounds(const MachineBasicBlock* MBB);
+
 const Function *getCallTarget(const MachineInstr *MI);
 
 MachineFunction *getCallTargetMF(const MachineInstr *MI);

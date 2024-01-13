@@ -259,6 +259,15 @@ struct PragmaVarLoopboundHandler : public PragmaHandler {
                     Token &FirstToken) override;
 };
 
+struct PragmaFullLoopboundHandler : public PragmaHandler {
+  PragmaFullLoopboundHandler() : PragmaHandler("fullloopbound") {}
+  void HandlePragma(Preprocessor &PP, PragmaIntroducer Introducer,
+                    Token &FirstToken) override;
+};
+
+
+
+
 struct PragmaMSRuntimeChecksHandler : public EmptyPragmaHandler {
   PragmaMSRuntimeChecksHandler() : EmptyPragmaHandler("runtime_checks") {}
 };
@@ -419,6 +428,9 @@ void Parser::initializePragmaHandlers() {
   VarLoopboundHandler = std::make_unique<PragmaVarLoopboundHandler>();
   PP.AddPragmaHandler(VarLoopboundHandler.get());
 
+  FullLoopboundHandler = std::make_unique<PragmaFullLoopboundHandler>();
+  PP.AddPragmaHandler(FullLoopboundHandler.get());
+
   UnrollHintHandler = std::make_unique<PragmaUnrollHintHandler>("unroll");
   PP.AddPragmaHandler(UnrollHintHandler.get());
 
@@ -543,6 +555,9 @@ void Parser::resetPragmaHandlers() {
 
   PP.RemovePragmaHandler(VarLoopboundHandler.get());
   VarLoopboundHandler.reset();
+
+  PP.RemovePragmaHandler(FullLoopboundHandler.get());
+  FullLoopboundHandler.reset();
 
   PP.RemovePragmaHandler(UnrollHintHandler.get());
   UnrollHintHandler.reset();
@@ -1322,6 +1337,13 @@ struct PragmaVarLoopboundInfo {
   ArrayRef<Token> Toks;
 };
 
+struct PragmaFullLoopboundInfo {
+  Token PragmaName;
+  Token Min;
+  Token Max;
+};
+
+
 void Parser::HandlePragmaLoopbound(Loopbound &LB) {
   assert(Tok.is(tok::annot_pragma_loopbound));
 
@@ -1343,6 +1365,64 @@ void Parser::HandlePragmaLoopbound(Loopbound &LB) {
       SourceRange(Info->PragmaName.getLocation(), Info->Max.getLocation());
 }
 
+void Parser::HandlePragmaFullLoopbound(FullLoopbound &FLB) {
+  assert(Tok.is(tok::annot_pragma_fullloopbound));
+
+  llvm::outs() << " ParsePragma.cpp - Parser::HandlePragmaFullLoopbound\n";
+
+  PragmaFullLoopboundInfo *Info =
+      static_cast<PragmaFullLoopboundInfo *>(Tok.getAnnotationValue());
+
+  // DEBUG
+  // llvm::outs() << Info->Min.getIdentifierInfo()->getName().str() << "\n";
+  // llvm::outs() << Info->Max.getIdentifierInfo()->getName().str() << "\n";
+  // llvm::outs() << Info->Min.getName() << "\n";
+  // llvm::outs() << Info->Max.getName() << "\n";
+  // END DEBUG
+
+
+  FLB.PragmaNameLoc =
+      IdentifierLoc::create(Actions.Context, Info->PragmaName.getLocation(),
+                            Info->PragmaName.getIdentifierInfo());
+
+  //assert(Info->Min.is(tok::numeric_constant));
+  //FLB.MinExpr = Actions.ActOnNumericConstant(Info->Min).get();
+  
+  llvm::ArrayRef<Token> Tok1 = Info->Min;
+  llvm::ArrayRef<Token> Tok2 = Info->Min;
+
+  llvm::ArrayRef<Token> Toks;
+
+  SmallVector<Token, 2> ValueList;
+  ValueList.push_back(Info->Min);
+  ValueList.push_back(Info->Max);
+  Toks = llvm::makeArrayRef(ValueList).copy(PP.getPreprocessorAllocator());
+
+  PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/false, false);
+  ConsumeAnnotationToken();
+
+  FLB.MinExpr = ParseConstantExpression().get();
+  FLB.MaxExpr = ParseConstantExpression().get();
+
+  llvm::outs() << " Dumping FLB.MinExpr \n";
+  FLB.MinExpr->dump();
+
+  llvm::outs() << " Dumping FLB.MaxExpr \n";
+  FLB.MaxExpr->dump();
+
+
+
+
+  //ConsumeToken(); // Consume the constant expression eof terminator.
+  FLB.Range = SourceRange(Info->PragmaName.getLocation(),
+                           Info->Max.getLocation());
+
+  llvm::outs() << " Done with handling";
+  //FLB.Range =
+      //SourceRange(Info->PragmaName.getLocation(), Info->Max.getLocation());
+
+}
+
 bool Parser::HandlePragmaVarLoopbound(VarLoopbound &Hint) {
 
   assert(Tok.is(tok::annot_pragma_varloopbound));
@@ -1357,10 +1437,7 @@ bool Parser::HandlePragmaVarLoopbound(VarLoopbound &Hint) {
   Hint.OptionLoc = IdentifierLoc::create(
       Actions.Context, Info->Option.getLocation(), OptionInfo);
 
-  if (not Info->Min.is(tok::numeric_constant)) {
-    printf("Error, Min is not a numeric constant");
-    assert(Info->Min.is(tok::numeric_constant));
-  }
+  assert(Info->Min.is(tok::numeric_constant));
   
   Hint.MinExpr = Actions.ActOnNumericConstant(Info->Min).get();
 
@@ -3613,6 +3690,69 @@ void PragmaVarLoopboundHandler::HandlePragma(Preprocessor &PP,
   PP.EnterTokenStream(std::move(TokenArray), TokenList.size(),
                       /*DisableMacroExpansion=*/false, false);
 }
+
+
+void PragmaFullLoopboundHandler::HandlePragma(Preprocessor &PP,
+                                             PragmaIntroducer Introducer,
+                                             Token &Tok) {
+  llvm::outs() << " ParsePragma.cpp - handle full pragma\n";
+  Token LoopboundTok = Tok;
+
+  PragmaLoopboundInfo *Info =
+      new (PP.getPreprocessorAllocator()) PragmaLoopboundInfo;
+  Info->PragmaName = LoopboundTok;
+
+  PP.LexUnexpandedToken(Tok);
+  if (Tok.isNot(tok::identifier) || !Tok.getIdentifierInfo()->isStr("min")) {
+    PP.Diag(Tok.getLocation(), diag::err_pragma_fullloopbound_malformed);
+    return;
+  }
+
+
+  llvm::outs() << " ParsePragma.cpp - handle full pragma debug 1\n";
+
+  PP.Lex(Tok); // allow macro expansion for minimum
+  if (!Tok.is(tok::identifier)) {
+    PP.Diag(Tok.getLocation(), diag::err_pragma_fullloopbound_malformed);
+    return;
+  }
+  Info->Min = Tok;
+
+
+  PP.LexUnexpandedToken(Tok);
+  if (Tok.isNot(tok::identifier) || !Tok.getIdentifierInfo()->isStr("max")) {
+    PP.Diag(Tok.getLocation(), diag::err_pragma_fullloopbound_malformed);
+    return;
+  }
+
+  PP.Lex(Tok); // allow macro expansion for maximum
+  if (!Tok.is(tok::identifier)) {
+    PP.Diag(Tok.getLocation(), diag::err_pragma_fullloopbound_malformed);
+    return;
+  }
+  // store loopbound max
+  Info->Max = Tok;
+
+  // eat the max
+  PP.Lex(Tok);
+  if (Tok.isNot(tok::eod)) {
+    PP.Diag(Tok.getLocation(), diag::err_pragma_fullloopbound_malformed);
+    return;
+  }
+
+  llvm::outs() << " ParsePragma.cpp - handle full pragma debug 3\n";
+  auto TokenArray = std::make_unique<Token[]>(1);
+  TokenArray[0].startToken();
+  TokenArray[0].setKind(tok::annot_pragma_fullloopbound);
+  TokenArray[0].setLocation(Introducer.Loc);
+  TokenArray[0].setAnnotationEndLoc(LoopboundTok.getLocation());
+  TokenArray[0].setAnnotationValue(static_cast<void *>(Info));
+  PP.EnterTokenStream(std::move(TokenArray), 1, /*DisableMacroExpansion=*/false,
+                      /*IsReinject=*/false);
+
+}
+
+
 
 /// Handle the Microsoft \#pragma intrinsic extension.
 ///

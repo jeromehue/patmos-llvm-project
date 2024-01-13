@@ -30,9 +30,23 @@ FunctionPass *llvm::createPatmosConstantLoopDominatorsPass() {
 }
 
 static bool constantBounds(const MachineBasicBlock *mbb) {
-  if(auto bounds = getLoopBounds(mbb)) {
-    return bounds->first == bounds->second;
+  if(auto Bounds = getLoopBounds(mbb)) {
+    return Bounds->first == Bounds->second;
+  } 
+
+  if (auto MinReg = getMininumIterationCountRegister(mbb)) {
+    if(not MinReg.hasValue()) {
+      return false;
+    }
+  
+    auto MaxReg = getVLoopBounds(mbb);
+    if(MaxReg and MaxReg.hasValue()) {
+      if(MaxReg == MinReg) {
+        return true;
+      } 
+    }
   }
+
   return false;
 }
 

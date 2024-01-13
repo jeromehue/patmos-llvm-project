@@ -1,7 +1,7 @@
 ; RUN: EXEC_ARGS="0=6 1=3 2=6 3=3 4=6 5=3"; \
 ; RUN: WITH_DEBUG=true; \
-; XFAIL:* 
 ; RUN: %test_execution
+; XFAIL:* 
 ; END.
 ;//////////////////////////////////////////////////////////////////////////////////////////////////
 ; 
@@ -26,6 +26,7 @@ entry:
   
 if.then:
   %res.then = load volatile i32, i32* @_3
+  %nlb = add nsw i32 %res.then, 5
   br label %do.entry
 
 if.else:

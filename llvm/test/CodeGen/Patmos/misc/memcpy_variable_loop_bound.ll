@@ -22,7 +22,7 @@
 ;//////////////////////////////////////////////////////////////////////////////////////////////////
 ; END
 
-; CHECK: llvm.memcpy length argument not a constant value
+; CHECK: LoopBound variable cannot be proven constant
 
 define i32 @main(i32 %x, i8* %ptr.dst, i8* %ptr.src) {
 entry:

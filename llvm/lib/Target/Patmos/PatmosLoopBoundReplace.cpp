@@ -315,13 +315,10 @@ bool PatmosLoopBoundReplace::runOnModule(Module &M) {
     }
   }
 
-  llvm::dbgs() << " Replacing \n";
-  llvm::outs() << " Replacing for n = " << toReplace.size() << "\n";
   for (size_t i = 0; i < toReplace.size(); ++i) {
     toReplace[i]->replaceAllUsesWith(toReplaceWith[i]);
     toReplace[i]->eraseFromParent();
   }
-  llvm::dbgs() << " Replaced \n";
   return true;
 
   /// Dumping Module

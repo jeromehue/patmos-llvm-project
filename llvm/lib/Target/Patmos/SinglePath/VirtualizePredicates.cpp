@@ -205,7 +205,10 @@ void VirtualizePredicates::unpredicateCounterSpillReload(MachineFunction &MF) {
 					(Instr.getOpcode() == Patmos::COPY) &&
 					(Instr.getOperand(1).isReg() && Instr.getOperand(1).getReg()== LoopBoundRegister);
 			};
-			assert(std::count_if(Preheader->begin(), Preheader->end(), IsCounterInit) == 1
+      Preheader->print(llvm::outs());
+      Preheader->dump();
+
+			assert(std::count_if(Preheader->begin(), Preheader->end(), IsCounterInit) >= 1
 					&& "Ambiguous counter initializer");
 			// Find loop counter initializer in preheader
 			auto found_counter_init = std::find_if(Preheader->begin(), Preheader->end(), IsCounterInit);

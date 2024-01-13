@@ -34,6 +34,7 @@ void llvm::getMBBIRName(const MachineBasicBlock *MBB,
 }
 
 Optional<std::pair<uint64_t, uint64_t>> llvm::getLoopBounds(const MachineBasicBlock * MBB) {
+
   if(MBB && MBB->getBasicBlock()) {
     auto bound_instr = std::find_if(MBB->begin(), MBB->end(), [&](auto &instr){
       return instr.getOpcode() == Patmos::PSEUDO_LOOPBOUND;
@@ -61,18 +62,33 @@ Optional<std::pair<uint64_t, uint64_t>> llvm::getLoopBounds(const MachineBasicBl
 Optional<Register> llvm::getVLoopBounds(const MachineBasicBlock * MBB) {
   if(MBB && MBB->getBasicBlock()) {
     auto LoopBoundInstruction = std::find_if(MBB->begin(), MBB->end(), [&](auto &Instr){
-      return Instr.getOpcode() == Patmos::V_PSEUDO_LOOPBOUND;
+      return (Instr.getOpcode() == Patmos::V_PSEUDO_LOOPBOUND or Instr.getOpcode() == Patmos::F_PSEUDO_LOOPBOUND);
     });
     if(LoopBoundInstruction != MBB->end()) {
-      assert(LoopBoundInstruction->getOperand(0).isImm());
       assert(LoopBoundInstruction->getOperand(1).isReg());
-
-      llvm::dbgs() << "Loopbound is register : " << LoopBoundInstruction->getOperand(1) << "\n";
-      auto Max = LoopBoundInstruction->getOperand(1).getReg();
-      return Max;
+      return LoopBoundInstruction->getOperand(1).getReg();
     }  
   }
   return None;
+}
+
+
+Optional<Register> llvm::getMininumIterationCountRegister(const MachineBasicBlock * MBB) {
+  if(MBB && MBB->getBasicBlock()) {
+    auto LoopBoundInstruction = std::find_if(MBB->begin(), MBB->end(), [&](auto &Instr){
+      return (Instr.getOpcode() == Patmos::V_PSEUDO_LOOPBOUND or Instr.getOpcode() == Patmos::F_PSEUDO_LOOPBOUND);
+    });
+    if(LoopBoundInstruction != MBB->end()) {
+      if(LoopBoundInstruction->getOperand(0).isReg()) {
+        return LoopBoundInstruction->getOperand(0).getReg();
+      } else {
+        return None;
+      }
+    }  
+  }
+  return None;
+
+
 }
 
 Target &llvm::getThePatmosTarget() {

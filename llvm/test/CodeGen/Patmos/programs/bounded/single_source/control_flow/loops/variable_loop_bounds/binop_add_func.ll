@@ -3,13 +3,14 @@
 ; RUN: %test_execution
 ; END.
 
-; Test a call to a function with a simple loop in it
-
 @_1 = global i32 1
+@_10 = global i32 10
 
-define i32 @add_to(i32 %x, i32 %iterations, i32 %bound)  {
+define i32 @add_to(i32 %x, i32 %iterations)  {
 entry:
   %xm = sub i32 %x, 1 ; The base program was incorrect, fix it
+  %on = load volatile i32, i32* @_1
+  %bound = add i32 %on, 9 ; Compute bound by adding 1 and 5 %bound = load i32, i32* @_10
   br label %loop
   
 loop:
@@ -28,7 +29,7 @@ end:
 
 define i32 @main(i32 %x)  {
 entry:
-  %res = call i32 @add_to(i32 %x, i32 3, i32 5)
+  %res = call i32 @add_to(i32 %x, i32 3)
   ret i32 %res
 }
 

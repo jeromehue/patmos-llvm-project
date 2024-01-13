@@ -425,6 +425,11 @@ Retry:
     ProhibitAttributes(Attrs);
     return ParsePragmaVarLoopbound(Stmts, StmtCtx, TrailingElseLoc, Attrs);
 
+  case tok::annot_pragma_fullloopbound:
+    llvm::outs() << " ParseStmt.cpp - Met token for pragma full loopbound";
+    ProhibitAttributes(Attrs);
+    return ParsePragmaFullLoopbound(Stmts, StmtCtx, TrailingElseLoc, Attrs);
+
   case tok::annot_pragma_dump:
     HandlePragmaDump();
     return StmtEmpty();
@@ -2275,6 +2280,34 @@ StmtResult Parser::ParsePragmaLoopbound(StmtVector &Stmts,
   return S;
 }
 
+StmtResult Parser::ParsePragmaFullLoopbound(StmtVector &Stmts,
+                                        ParsedStmtContext StmtCtx,
+                                        SourceLocation *TrailingElseLoc,
+                                        ParsedAttributesWithRange &Attrs) {
+
+  llvm::outs() << " Handling Pragma FullLoopbound\n";
+  // Create temporary attribute list.
+  ParsedAttributesWithRange TempAttrs(AttrFactory);
+
+  // Get loopbound and consume annotated token.
+  while (Tok.is(tok::annot_pragma_fullloopbound)) {
+    FullLoopbound FLB;
+    HandlePragmaFullLoopbound(FLB);
+    ArgsUnion ArgFLB[] = {ArgsUnion(FLB.MinExpr), ArgsUnion(FLB.MaxExpr)};
+    TempAttrs.addNew(FLB.PragmaNameLoc->Ident, FLB.Range, nullptr,
+                     FLB.PragmaNameLoc->Loc, ArgFLB, 2, ParsedAttr::AS_Pragma);
+  }
+
+  // Get the next statement.
+  MaybeParseCXX11Attributes(Attrs);
+
+  StmtResult S = ParseStatementOrDeclarationAfterAttributes(
+      Stmts, StmtCtx, TrailingElseLoc, Attrs);
+
+  Attrs.takeAllFrom(TempAttrs);
+  return S;
+}
+
 StmtResult Parser::ParsePragmaVarLoopbound(StmtVector &Stmts,
                                            ParsedStmtContext StmtCtx,
                                            SourceLocation *TrailingElseLoc,
@@ -2312,6 +2345,7 @@ StmtResult Parser::ParsePragmaVarLoopbound(StmtVector &Stmts,
   Attrs.takeAllFrom(TempAttrs);
   return S;
 }
+
 
 Decl *Parser::ParseFunctionStatementBody(Decl *Decl, ParseScope &BodyScope) {
   assert(Tok.is(tok::l_brace));

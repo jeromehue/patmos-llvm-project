@@ -154,6 +154,7 @@ namespace {
     /// run passes immediately before register allocation. This should return
     /// true if -print-machineinstrs should print after these passes.
     void addPreRegAlloc() override {
+
       // For -O0, add a pass that removes dead instructions to avoid issues
       // with spill code in naked functions containing function calls with
       // unused return values.

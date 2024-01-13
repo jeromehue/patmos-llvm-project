@@ -31,7 +31,7 @@ struct Loopbound {
   Loopbound() : PragmaNameLoc(nullptr), MinExpr(nullptr), MaxExpr(nullptr) {}
 };
 
-/// \brief Quality pragmas.
+/// \brief VarLoopbound pragmas.
 struct VarLoopbound {
   SourceRange Range;
   IdentifierLoc *PragmaNameLoc;
@@ -42,6 +42,19 @@ struct VarLoopbound {
   VarLoopbound()
       : PragmaNameLoc(nullptr), OptionLoc(nullptr), MinExpr(nullptr),
         MaxExpr(nullptr) {}
+};
+
+struct FullLoopbound {
+  // Source range of the directive.
+  SourceRange Range;
+  // Identifier corresponding to the name of the pragma ("fullloopbound")
+  IdentifierLoc *PragmaNameLoc;
+  // Expression for the min argument
+  Expr *MinExpr;
+  // Expression for the max argument
+  Expr *MaxExpr;
+
+  FullLoopbound() : PragmaNameLoc(nullptr), MinExpr(nullptr), MaxExpr(nullptr) {}
 };
 
 } // end namespace clang

@@ -38,6 +38,8 @@ def SDT_PatmosLoopBound   : SDTypeProfile<0, 2, [SDTCisI32<0>, SDTCisI32<1>]>;
 
 def SDT_PatmosVLoopBound   : SDTypeProfile<0, 2, [SDTCisI32<0>, SDTCisSameAs<0,1>]>;
 
+def SDT_PatmosFLoopBound   : SDTypeProfile<0, 2, [SDTCisI32<0>, SDTCisSameAs<0,1>]>;
+
 //===----------------------------------------------------------------------===//
 // Patmos Specific Predicates
 //===----------------------------------------------------------------------===//
@@ -75,6 +77,10 @@ def PatmosLoopBound
 
 def PatmosVLoopBound
                   : SDNode<"PatmosISD::V_LOOP_BOUND",   SDT_PatmosVLoopBound,
+                           [SDNPHasChain, SDNPOutGlue]>;
+
+def PatmosFLoopBound
+                  : SDNode<"PatmosISD::F_LOOP_BOUND",   SDT_PatmosFLoopBound,
                            [SDNPHasChain, SDNPOutGlue]>;
 
 //===----------------------------------------------------------------------===//
@@ -366,6 +372,11 @@ let hasSideEffects = 1 in // To ensure it is not optimized away
 def V_PSEUDO_LOOPBOUND : PseudoInst<(outs), (ins i32imm:$minv, RRegs:$maxv),
                           "#V_PSEUDO_LOOPBOUND", "[$minv,$maxv]",
                           [(PatmosVLoopBound timm:$minv, RRegs:$maxv)]>;
+
+let hasSideEffects = 1 in // To ensure it is not optimized away
+def F_PSEUDO_LOOPBOUND : PseudoInst<(outs), (ins RRegs:$minv, RRegs:$maxv),
+                          "#F_PSEUDO_LOOPBOUND", "[$minv,$maxv]",
+                          [(PatmosFLoopBound RRegs:$minv, RRegs:$maxv)]>;
 //===----------------------------------------------------------------------===//
 //  Control Flow Instructions...
 //===----------------------------------------------------------------------===//
