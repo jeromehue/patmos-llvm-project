@@ -1404,15 +1404,6 @@ void Parser::HandlePragmaFullLoopbound(FullLoopbound &FLB) {
   FLB.MinExpr = ParseConstantExpression().get();
   FLB.MaxExpr = ParseConstantExpression().get();
 
-  llvm::outs() << " Dumping FLB.MinExpr \n";
-  FLB.MinExpr->dump();
-
-  llvm::outs() << " Dumping FLB.MaxExpr \n";
-  FLB.MaxExpr->dump();
-
-
-
-
   //ConsumeToken(); // Consume the constant expression eof terminator.
   FLB.Range = SourceRange(Info->PragmaName.getLocation(),
                            Info->Max.getLocation());
@@ -3578,6 +3569,7 @@ void PragmaLoopboundHandler::HandlePragma(Preprocessor &PP,
 
   PP.Lex(Tok); // allow macro expansion for minimum
   if (!Tok.is(tok::numeric_constant)) {
+    llvm::errs() << "TODO: Fix this problem in ParsePragma.cpp:3581\n";
     PP.Diag(Tok.getLocation(), diag::err_pragma_loopbound_malformed);
     return;
   }
@@ -3592,6 +3584,7 @@ void PragmaLoopboundHandler::HandlePragma(Preprocessor &PP,
 
   PP.Lex(Tok); // allow macro expansion for maximum
   if (!Tok.is(tok::numeric_constant)) {
+    llvm::errs() << "TODO: Fix this problem in ParsePragma.cpp:3590\n";
     PP.Diag(Tok.getLocation(), diag::err_pragma_loopbound_malformed);
     return;
   }
@@ -3712,7 +3705,7 @@ void PragmaFullLoopboundHandler::HandlePragma(Preprocessor &PP,
   llvm::outs() << " ParsePragma.cpp - handle full pragma debug 1\n";
 
   PP.Lex(Tok); // allow macro expansion for minimum
-  if (!Tok.is(tok::identifier)) {
+  if (Tok.isNot(tok::identifier) and Tok.isNot(tok::numeric_constant)) {
     PP.Diag(Tok.getLocation(), diag::err_pragma_fullloopbound_malformed);
     return;
   }
@@ -3726,7 +3719,7 @@ void PragmaFullLoopboundHandler::HandlePragma(Preprocessor &PP,
   }
 
   PP.Lex(Tok); // allow macro expansion for maximum
-  if (!Tok.is(tok::identifier)) {
+  if (Tok.isNot(tok::identifier) and Tok.isNot(tok::numeric_constant)) {
     PP.Diag(Tok.getLocation(), diag::err_pragma_fullloopbound_malformed);
     return;
   }

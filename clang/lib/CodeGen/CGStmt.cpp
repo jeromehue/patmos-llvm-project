@@ -798,6 +798,7 @@ void CodeGenFunction::EmitLoopBounds(
    const ArrayRef<const Attr *> &Attrs,
    bool one_higher
 ) {
+
   auto *F = BB->getParent();
   auto &Context = BB->getContext();
   auto is_bound = [](auto attr){ return dyn_cast<LoopBoundAttr>(attr); };
@@ -819,7 +820,6 @@ void CodeGenFunction::EmitLoopBounds(
   if(foundFullBound != Attrs.end()) {
 
     auto *FullBound = dyn_cast<FullLoopBoundAttr>(*foundFullBound);
-    llvm::outs() << "  Here we are!";
 
     ASTContext& AC = CGM.getContext();
 
@@ -904,7 +904,6 @@ void CodeGenFunction::EmitLoopBounds(
 
     // Case 2
     if(MinAllocaBound && MaxAllocaBound) { 
-      llvm::outs() << " Double alloca\n";
 
       llvm::Value *MinVal = MinAllocaBound; 
       llvm::Value *MaxVal = MaxAllocaBound;
