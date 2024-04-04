@@ -3685,6 +3685,10 @@ void PragmaVarLoopboundHandler::HandlePragma(Preprocessor &PP,
 }
 
 
+// TODO: Merge this with the loopbound pragma, remove the `varloopbound` pragma from everywhere
+// TODO: Remove all debug prints to llvm::outs / llvm::errs
+
+// #pragma fullloopbound min EXPR max EXPR
 void PragmaFullLoopboundHandler::HandlePragma(Preprocessor &PP,
                                              PragmaIntroducer Introducer,
                                              Token &Tok) {
@@ -3703,14 +3707,19 @@ void PragmaFullLoopboundHandler::HandlePragma(Preprocessor &PP,
 
 
   llvm::outs() << " ParsePragma.cpp - handle full pragma debug 1\n";
+  auto MinIsNumericalConstant = false;
 
   PP.Lex(Tok); // allow macro expansion for minimum
   if (Tok.isNot(tok::identifier) and Tok.isNot(tok::numeric_constant)) {
     PP.Diag(Tok.getLocation(), diag::err_pragma_fullloopbound_malformed);
     return;
   }
-  Info->Min = Tok;
 
+  if(Tok.is(tok::numeric_constant)) {
+    MinIsNumericalConstant = true;
+  }
+
+  Info->Min = Tok;
 
   PP.LexUnexpandedToken(Tok);
   if (Tok.isNot(tok::identifier) || !Tok.getIdentifierInfo()->isStr("max")) {
@@ -3722,6 +3731,10 @@ void PragmaFullLoopboundHandler::HandlePragma(Preprocessor &PP,
   if (Tok.isNot(tok::identifier) and Tok.isNot(tok::numeric_constant)) {
     PP.Diag(Tok.getLocation(), diag::err_pragma_fullloopbound_malformed);
     return;
+  }
+  if(MinIsNumericalConstant and Tok.isNot(tok::numeric_constant)) {
+    // only one of the argument is a numeric constant
+    PP.Diag(Tok.getLocation(), diag::err_pragma_fullloopbound_malformed);
   }
   // store loopbound max
   Info->Max = Tok;

@@ -18,7 +18,7 @@
 int func1(int x) { 
 	int count = x;
 	
-	_Pragma( "loopbound min 3 max 7" )
+	_Pragma( "fullloopbound min 3 max x" )
 	while(x >0){
 	// CHECK: call void @llvm.loop.bound(i32 3, i32 4)
 	// CHECK-NOT: call void @llvm.loop.bound(i32 3, i32 4)
